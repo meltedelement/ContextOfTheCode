@@ -1,0 +1,13 @@
+{
+  "message_id": "uuid",
+  "timestamp": 1642534800.123,
+  "device_id": "local-system-001",
+  "source": "local",
+  "data": {
+    "ram_usage_percent": 45.2,
+    "ram_used_mb": 7234.5,
+    "ram_total_mb": 16000.0,
+    "cpu_usage_percent": 23.5,
+    "cpu_temp_celsius": 58.3
+  }
+}

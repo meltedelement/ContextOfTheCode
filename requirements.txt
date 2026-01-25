@@ -1,0 +1,10 @@
+# Data Collector Project Dependencies
+
+# Core dependencies
+pydantic>=2.0.0          # Data validation and serialization
+psutil>=5.9.0            # System metrics collection
+
+# Future dependencies (uncomment when needed)
+# flask>=3.0.0           # For aggregator API
+# sqlalchemy>=2.0.0      # For database operations
+# redis>=5.0.0           # For upload queue (optional)

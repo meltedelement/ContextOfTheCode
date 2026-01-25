@@ -1,0 +1,41 @@
+# Data Collector and Upload Queue Configuration
+
+[data_model]
+# Path to the JSON schema file that defines the message format
+schema_path = "data_model.json"
+
+[collectors]
+# Default collection interval in seconds
+default_interval = 60
+
+# Enable/disable specific collector types
+enabled_collectors = ["local", "mobile", "third_party"]
+
+# CPU sampling interval in seconds for accuracy
+cpu_sample_interval = 1.0
+
+# Decimal precision for rounding metrics
+metric_precision = 1
+
+[upload_queue]
+# Maximum queue size (number of messages)
+max_queue_size = 1000
+
+# Queue timeout in seconds
+queue_timeout = 30
+
+# Batch size for uploads
+batch_size = 10
+
+[logging]
+# Logging level (DEBUG, INFO, WARNING, ERROR)
+level = "INFO"
+
+# Enable console output for exports
+console_export = true
+
+# JSON output indentation (number of spaces, 0 for compact)
+json_indent = 2
+
+# Log file path (optional)
+# log_file = "data_collector.log"
