@@ -1,5 +1,10 @@
 # Data Collector and Upload Queue Configuration
 
+[logging]
+level = "DEBUG"
+file = "logger/logs/system_metrics.log"
+format = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+
 [data_model]
 # Path to the JSON schema file that defines the message format
 schema_path = "data_model.json"
