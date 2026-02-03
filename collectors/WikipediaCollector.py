@@ -7,15 +7,17 @@ every minute to track editing activity.
 
 from collectors.base_data_collector import BaseDataCollector, DataMessage, CONFIG
 from typing import Dict, Any, Optional
-import requests
-import time
 from datetime import datetime, timedelta, timezone
+import requests
+import sys
+import time
 
 # Constants
 SOURCE_TYPE = "wikipedia"  # Source identifier for Wikipedia collector
 DEFAULT_LANGUAGE = "en"  # Default to English Wikipedia
 API_TIMEOUT = 10  # HTTP request timeout in seconds
 NAMESPACE_ARTICLES = 0  # Namespace 0 = article pages (not talk pages, etc.)
+ISO_UTC_SUFFIX = "Z"  # UTC timezone suffix for ISO 8601 timestamps
 
 
 class WikipediaCollector(BaseDataCollector):
@@ -61,11 +63,17 @@ class WikipediaCollector(BaseDataCollector):
         }
 
         try:
+            # Get User-Agent from config
+            user_agent = CONFIG.get("wikipedia", {}).get(
+                "user_agent",
+                "WikipediaDataCollector/1.0 (Educational Project)"
+            )
+
             response = requests.get(
                 self.api_url,
                 params=params,
                 timeout=API_TIMEOUT,
-                headers={"User-Agent": "WikipediaDataCollector/1.0 (Educational Project)"}
+                headers={"User-Agent": user_agent}
             )
             response.raise_for_status()
 
@@ -87,28 +95,29 @@ class WikipediaCollector(BaseDataCollector):
 
     def collect_data(self) -> Dict[str, Any]:
         """
-        Collect Wikipedia edit count for the last minute.
+        Collect Wikipedia edit count for the configured time window.
 
         Returns:
             Dictionary with metrics including:
-            - edit_count_last_minute: Number of edits in the past 60 seconds
+            - edit_count_last_minute: Number of edits in the configured time window
             - wikipedia_language: Language code of Wikipedia being monitored
             - query_success: Boolean indicating if the query succeeded
             - query_timestamp: ISO timestamp of when the query was made
         """
-        # Get precision from config
+        # Get configuration values
         precision = CONFIG.get("collectors", {}).get("metric_precision", 1)
+        collection_window = CONFIG.get("wikipedia", {}).get("collection_window", 60)
 
-        # Calculate time window: last 60 seconds
+        # Calculate time window using configured collection window
         end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(seconds=60)
+        start_time = end_time - timedelta(seconds=collection_window)
 
         # Query the API
         edit_count = self._query_recent_changes(start_time, end_time)
 
         data = {
             "wikipedia_language": self.wikipedia_language,
-            "query_timestamp": end_time.isoformat() + "Z",
+            "query_timestamp": end_time.isoformat() + ISO_UTC_SUFFIX,
         }
 
         if edit_count is not None:
@@ -146,8 +155,6 @@ class WikipediaCollector(BaseDataCollector):
 
 # Example usage
 if __name__ == "__main__":
-    import sys
-
     # Allow language to be specified via command line
     language = sys.argv[1] if len(sys.argv) > 1 else "en"
 
