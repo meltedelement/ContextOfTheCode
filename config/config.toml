@@ -17,6 +17,13 @@ cpu_sample_interval = 1.0
 # Decimal precision for rounding metrics
 metric_precision = 1
 
+[wikipedia]
+# Time window in seconds for collecting edit counts
+collection_window = 60
+
+# User-Agent string for Wikipedia API requests
+user_agent = "WikipediaDataCollector/1.0 (Educational Project)"
+
 [upload_queue]
 # Maximum queue size (number of messages)
 max_queue_size = 1000
