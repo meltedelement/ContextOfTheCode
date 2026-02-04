@@ -37,11 +37,11 @@ def load_config(config_path: str = None) -> Dict[str, Any]:
     else:
         config_path = Path(config_path)
 
-    logger.debug(f"Loading config from: {config_path}")
+    logger.debug("Loading config from: %s", config_path)
 
     if not config_path.exists():
-        logger.error(f"Config file not found: {config_path}")
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+        logger.error("Config file not found: %s", config_path)
+        raise FileNotFoundError("Configuration file not found: %s" % config_path)
 
     with open(config_path, "rb") as f:
         logger.debug("Configuration loaded successfully")
@@ -99,7 +99,7 @@ class BaseDataCollector(ABC):
         self.source = source
         self.device_id = device_id
 
-        logger.debug(f"Collector init with source={source}, device_id={device_id}")
+        logger.debug("Collector init with source = %s, device_id = %s", source, device_id)
 
     @abstractmethod
     def collect_data(self) -> Dict[str, Any]:
@@ -147,7 +147,7 @@ class BaseDataCollector(ABC):
             DataMessage Pydantic model with validated data following the schema
         """
         data = self.collect_data()
-        logger.debug(f"Collected data: {data}")
+        logger.debug("Collected data: %s", data)
 
         # Create validated Pydantic message
         message = DataMessage(
@@ -155,7 +155,7 @@ class BaseDataCollector(ABC):
             source=self.source,
             data=data
         )
-        logger.debug(f"Generated message: {message}")
+        logger.debug("Generated message: %s", message)
 
         # Automatically export to data model
         self.export_to_data_model(message)

@@ -1,6 +1,7 @@
 # Data Collector and Upload Queue Configuration
 
 [logging]
+# Change logging level to: DEBUG, INFO, WARNING, ERROR, CRITICAL, to specifiy detail required in logging
 level = "DEBUG"
 file = "logger/logs/system_metrics.log"
 format = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"

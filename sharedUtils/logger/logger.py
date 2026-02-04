@@ -31,7 +31,7 @@ def get_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
 
     if not logger.hasHandlers():
-        logger.setLevel(cfg["level"])
+        logger.setLevel(getattr(logging, cfg["level"], logging.INFO))
 
         formatter = logging.Formatter(cfg["format"])
 

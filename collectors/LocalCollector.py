@@ -50,7 +50,7 @@ class LocalDataCollector(BaseDataCollector):
                 # Fallback to first available sensor
                 first_sensor = next(iter(temps.values()))
                 if first_sensor:
-                    logger.info(f"CPU temperature: {first_sensor[0].current, precision}")
+                    logger.info("CPU temperature: %s", (first_sensor[0].current, precision))
                     return round(first_sensor[0].current, precision)
         return None
 
@@ -84,12 +84,12 @@ class LocalDataCollector(BaseDataCollector):
             "cpu_usage_percent": round(cpu_percent, precision),
         }
 
-        logger.info(f"Collected local metrics: {data}")
+        logger.info("Collected local metrics: %s", data)
 
         # Only include CPU temp if available
         if cpu_temp is not None:
             data["cpu_temp_celsius"] = cpu_temp
-            logger.info(f"Including CPU temperature: {cpu_temp}°C")
+            logger.info("Including CPU temperature: %s°C", cpu_temp)
 
         return data
 
@@ -112,7 +112,7 @@ class LocalDataCollector(BaseDataCollector):
 
         # Log to console if enabled in config (simulating upload queue)
         if CONFIG.get("logging", {}).get("console_export", True):
-            logger.debug(f"Exporting data model to console: {message.device_id}")
+            logger.debug("Exporting data model to console: %s", message.device_id)
             print(f"\n[DATA MODEL EXPORT - {self.source.upper()}]")
             print(json_output)
             print(f"[END EXPORT]\n")
