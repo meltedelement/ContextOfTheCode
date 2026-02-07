@@ -2,10 +2,11 @@
 System Data Collector Implementation
 
 Collects real system metrics including CPU temperature and RAM usage.
+All metric values are floats to keep the data model simple and consistent.
 """
 
-from collectors.base_data_collector import BaseDataCollector, DataMessage, CONFIG
-from typing import Dict, Any, Optional
+from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry, CONFIG
+from typing import List, Optional
 import psutil
 from sharedUtils.logger.logger import get_logger
 
@@ -50,20 +51,20 @@ class LocalDataCollector(BaseDataCollector):
                 # Fallback to first available sensor
                 first_sensor = next(iter(temps.values()))
                 if first_sensor:
-                    logger.info("CPU temperature: %s", (first_sensor[0].current, precision))
+                    logger.info("CPU temperature: %s", first_sensor[0].current)
                     return round(first_sensor[0].current, precision)
         return None
 
-    def collect_data(self) -> Dict[str, Any]:
+    def collect_data(self) -> List[MetricEntry]:
         """
         Collect data from local system.
 
         Returns:
-            Dictionary with system metrics including:
-            - cpu_temp_celsius: CPU temperature in Celsius (if available)
+            List of MetricEntry objects with float values for:
             - ram_usage_percent: RAM usage percentage
             - ram_used_mb: RAM used in MB
             - cpu_usage_percent: CPU usage percentage
+            - cpu_temp_celsius: CPU temperature in Celsius (if available)
         """
         # Get config values
         precision = CONFIG.get("collectors", {}).get("metric_precision", 1)
@@ -75,23 +76,22 @@ class LocalDataCollector(BaseDataCollector):
         # Get CPU usage (sample over configured interval for accuracy)
         cpu_percent = psutil.cpu_percent(interval=cpu_interval)
 
-        # Get CPU temperature
-        cpu_temp = self._get_cpu_temperature()
+        # Build metrics list — all values are floats
+        metrics = [
+            MetricEntry(metric_name="ram_usage_percent", metric_value=round(memory.percent, precision)),
+            MetricEntry(metric_name="ram_used_mb", metric_value=round(memory.used / BYTES_TO_MB, precision)),
+            MetricEntry(metric_name="cpu_usage_percent", metric_value=round(cpu_percent, precision)),
+        ]
 
-        data = {
-            "ram_usage_percent": round(memory.percent, precision),
-            "ram_used_mb": round(memory.used / BYTES_TO_MB, precision),
-            "cpu_usage_percent": round(cpu_percent, precision),
-        }
-
-        logger.info("Collected local metrics: %s", data)
+        logger.info("Collected local metrics: %s", [(m.metric_name, m.metric_value) for m in metrics])
 
         # Only include CPU temp if available
+        cpu_temp = self._get_cpu_temperature()
         if cpu_temp is not None:
-            data["cpu_temp_celsius"] = cpu_temp
+            metrics.append(MetricEntry(metric_name="cpu_temp_celsius", metric_value=cpu_temp))
             logger.info("Including CPU temperature: %s°C", cpu_temp)
 
-        return data
+        return metrics
 
     def export_to_data_model(self, message: DataMessage) -> None:
         """
@@ -102,7 +102,7 @@ class LocalDataCollector(BaseDataCollector):
         send the message to the upload queue.
 
         Args:
-            message: DataMessage Pydantic model with metadata and collected data
+            message: DataMessage Pydantic model with metadata and collected metrics
         """
         # Get JSON formatting from config
         json_indent = CONFIG.get("logging", {}).get("json_indent", 2)
@@ -134,7 +134,6 @@ if __name__ == "__main__":
     print("\nCollector Info:")
     print(f"  Device ID: {collector.device_id}")
     print(f"  Source: {collector.source}")
-    print(f"\nConfiguration:")
-    print(f"  Schema path: {CONFIG.get('data_model', {}).get('schema_path')}")
-    print(f"  Metric precision: {CONFIG.get('collectors', {}).get('metric_precision')}")
-    print(f"  CPU sample interval: {CONFIG.get('collectors', {}).get('cpu_sample_interval')}s")
+    print(f"  Metrics collected: {len(message.metrics)}")
+    for m in message.metrics:
+        print(f"    {m.metric_name}: {m.metric_value}")

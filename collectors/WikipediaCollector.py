@@ -2,11 +2,11 @@
 Wikipedia Edit Collector Implementation
 
 Collects Wikipedia edit counts by polling the MediaWiki Recent Changes API
-every minute to track editing activity.
+every minute to track editing activity. Only emits float metric values.
 """
 
-from collectors.base_data_collector import BaseDataCollector, DataMessage, CONFIG
-from typing import Dict, Any, Optional
+from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry, CONFIG
+from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import requests
 import sys
@@ -19,7 +19,6 @@ SOURCE_TYPE = "wikipedia"  # Source identifier for Wikipedia collector
 DEFAULT_LANGUAGE = "en"  # Default to English Wikipedia
 API_TIMEOUT = 10  # HTTP request timeout in seconds
 NAMESPACE_ARTICLES = 0  # Namespace 0 = article pages (not talk pages, etc.)
-ISO_UTC_SUFFIX = "Z"  # UTC timezone suffix for ISO 8601 timestamps
 
 
 class WikipediaCollector(BaseDataCollector):
@@ -34,7 +33,6 @@ class WikipediaCollector(BaseDataCollector):
             wikipedia_language: Language code for Wikipedia (e.g., 'en', 'fr', 'de')
         """
         logger.debug("Initialising WikipediaCollector for %s", wikipedia_language)
-        super().__init__(source=SOURCE_TYPE, device_id=device_id)
         super().__init__(source=SOURCE_TYPE, device_id=device_id)
         self.wikipedia_language = wikipedia_language
         self.api_url = f"https://{wikipedia_language}.wikipedia.org/w/api.php"
@@ -51,10 +49,9 @@ class WikipediaCollector(BaseDataCollector):
             Number of edits in the time window, or None if query failed
         """
         # Format timestamps for MediaWiki API (ISO 8601 format)
-        # API expects format: YYYY-MM-DDTHH:MM:SSZ
-        logger.debug("Querying Wikipedia API from %s to %s", rc_start, rc_end)
         rc_start = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
         rc_end = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        logger.debug("Querying Wikipedia API from %s to %s", rc_start, rc_end)
 
         params = {
             "action": "query",
@@ -93,27 +90,22 @@ class WikipediaCollector(BaseDataCollector):
                 return 0
 
         except requests.exceptions.RequestException as e:
-            # Log error but don't crash - return None to indicate failure
-            print(f"[WARNING] Failed to query Wikipedia API: {e}")
             logger.warning("Failed to query Wikipedia API: %s", e)
             return None
         except (KeyError, ValueError) as e:
             logger.warning("Failed to parse Wikipedia API response: %s", e)
             return None
 
-    def collect_data(self) -> Dict[str, Any]:
+    def collect_data(self) -> List[MetricEntry]:
         """
         Collect Wikipedia edit count for the configured time window.
 
         Returns:
-            Dictionary with metrics including:
-            - edit_count_last_minute: Number of edits in the configured time window
-            - wikipedia_language: Language code of Wikipedia being monitored
-            - query_success: Boolean indicating if the query succeeded
-            - query_timestamp: ISO timestamp of when the query was made
+            List of MetricEntry objects with float values for:
+            - edit_count: Number of edits in the configured time window
+            - query_success: 1.0 if query succeeded, 0.0 if it failed
         """
         # Get configuration values
-        precision = CONFIG.get("collectors", {}).get("metric_precision", 1)
         collection_window = CONFIG.get("wikipedia", {}).get("collection_window", 60)
 
         # Calculate time window using configured collection window
@@ -124,21 +116,21 @@ class WikipediaCollector(BaseDataCollector):
         # Query the API
         edit_count = self._query_recent_changes(start_time, end_time)
 
-        data = {
-            "wikipedia_language": self.wikipedia_language,
-            "query_timestamp": end_time.isoformat() + ISO_UTC_SUFFIX,
-        }
-
+        # Build metrics — all values are floats
         if edit_count is not None:
-            data["edit_count_last_minute"] = edit_count
-            data["query_success"] = True
-            logger.info("Edit count for last minute: %s", edit_count)
+            metrics = [
+                MetricEntry(metric_name="edit_count", metric_value=float(edit_count)),
+                MetricEntry(metric_name="query_success", metric_value=1.0),
+            ]
+            logger.info("Edit count for last %ds: %s", collection_window, edit_count)
         else:
-            data["edit_count_last_minute"] = 0
-            data["query_success"] = False
+            metrics = [
+                MetricEntry(metric_name="edit_count", metric_value=0.0),
+                MetricEntry(metric_name="query_success", metric_value=0.0),
+            ]
             logger.warning("Edit count could not be retrieved — API query failed")
 
-        return data
+        return metrics
 
     def export_to_data_model(self, message: DataMessage) -> None:
         """
@@ -149,7 +141,7 @@ class WikipediaCollector(BaseDataCollector):
         send the message to the upload queue.
 
         Args:
-            message: DataMessage Pydantic model with metadata and collected data
+            message: DataMessage Pydantic model with metadata and collected metrics
         """
         # Get JSON formatting from config
         json_indent = CONFIG.get("logging", {}).get("json_indent", 2)
@@ -180,9 +172,6 @@ if __name__ == "__main__":
     print(f"Monitoring: {language}.wikipedia.org")
     print(f"Device ID: {collector.device_id}")
     print(f"Source: {collector.source}")
-    print(f"\nConfiguration:")
-    print(f"  Metric precision: {CONFIG.get('collectors', {}).get('metric_precision')}")
-    print(f"  Console export: {CONFIG.get('logging', {}).get('console_export')}")
     print(f"\n{'='*60}\n")
 
     # Single collection example
@@ -201,11 +190,13 @@ if __name__ == "__main__":
             print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC] Collecting data...")
             message = collector.generate_message()
 
-            # Show summary
-            edit_count = message.data.get("edit_count_last_minute", 0)
-            success = message.data.get("query_success", False)
+            # Show summary from metrics list
+            edit_metric = next((m for m in message.metrics if m.metric_name == "edit_count"), None)
+            success_metric = next((m for m in message.metrics if m.metric_name == "query_success"), None)
+            edit_count = edit_metric.metric_value if edit_metric else 0
+            success = success_metric.metric_value == 1.0 if success_metric else False
             status = "✓" if success else "✗"
-            print(f"  {status} Edits in last minute: {edit_count}")
+            print(f"  {status} Edits in last minute: {int(edit_count)}")
 
             # Wait for next poll
             print(f"  Waiting {poll_interval} seconds until next poll...\n")
