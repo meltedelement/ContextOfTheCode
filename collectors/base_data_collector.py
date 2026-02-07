@@ -31,9 +31,9 @@ def load_config(config_path: str = None) -> Dict[str, Any]:
         FileNotFoundError: If config file doesn't exist
     """
     if config_path is None:
-        # Default to config/config.toml relative to project root
+        # Default to sharedUtils/config/config.toml relative to project root
         project_root = Path(__file__).parent.parent
-        config_path = project_root / "config" / "config.toml"
+        config_path = project_root / "sharedUtils" / "config" / "config.toml"
     else:
         config_path = Path(config_path)
 
