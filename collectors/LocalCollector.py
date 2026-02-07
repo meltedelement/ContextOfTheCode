@@ -7,8 +7,11 @@ Collects real system metrics including CPU temperature and RAM usage.
 from collectors.base_data_collector import BaseDataCollector, DataMessage, CONFIG
 from typing import Dict, Any, Optional
 import psutil
+from sharedUtils.logger.logger import get_logger
+
 
 # Constants
+logger = get_logger(__name__)
 BYTES_TO_MB = 1024 * 1024  # Conversion factor from bytes to megabytes
 SENSOR_NAMES = ['coretemp', 'k10temp', 'zenpower']  # CPU temperature sensor names (Intel, AMD)
 SOURCE_TYPE = "local"  # Source identifier for local system collector
@@ -24,6 +27,7 @@ class LocalDataCollector(BaseDataCollector):
         Args:
             device_id: Unique identifier for the device
         """
+        logger.debug("Initialising LocalCollector")
         super().__init__(source=SOURCE_TYPE, device_id=device_id)
 
     def _get_cpu_temperature(self) -> Optional[float]:
@@ -33,6 +37,7 @@ class LocalDataCollector(BaseDataCollector):
         Returns:
             CPU temperature in Celsius, or None if unavailable
         """
+        logger.debug("Collecting local system cpu temperature")
         precision = CONFIG.get("collectors", {}).get("metric_precision", 1)
 
         if hasattr(psutil, "sensors_temperatures"):
@@ -45,6 +50,7 @@ class LocalDataCollector(BaseDataCollector):
                 # Fallback to first available sensor
                 first_sensor = next(iter(temps.values()))
                 if first_sensor:
+                    logger.info("CPU temperature: %s", (first_sensor[0].current, precision))
                     return round(first_sensor[0].current, precision)
         return None
 
@@ -78,9 +84,12 @@ class LocalDataCollector(BaseDataCollector):
             "cpu_usage_percent": round(cpu_percent, precision),
         }
 
+        logger.info("Collected local metrics: %s", data)
+
         # Only include CPU temp if available
         if cpu_temp is not None:
             data["cpu_temp_celsius"] = cpu_temp
+            logger.info("Including CPU temperature: %s°C", cpu_temp)
 
         return data
 
@@ -103,6 +112,7 @@ class LocalDataCollector(BaseDataCollector):
 
         # Log to console if enabled in config (simulating upload queue)
         if CONFIG.get("logging", {}).get("console_export", True):
+            logger.debug("Exporting data model to console: %s", message.device_id)
             print(f"\n[DATA MODEL EXPORT - {self.source.upper()}]")
             print(json_output)
             print(f"[END EXPORT]\n")

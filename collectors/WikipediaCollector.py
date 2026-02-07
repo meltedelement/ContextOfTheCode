@@ -11,8 +11,10 @@ from datetime import datetime, timedelta, timezone
 import requests
 import sys
 import time
+from sharedUtils.logger.logger import get_logger
 
 # Constants
+logger = get_logger(__name__)
 SOURCE_TYPE = "wikipedia"  # Source identifier for Wikipedia collector
 DEFAULT_LANGUAGE = "en"  # Default to English Wikipedia
 API_TIMEOUT = 10  # HTTP request timeout in seconds
@@ -31,6 +33,8 @@ class WikipediaCollector(BaseDataCollector):
             device_id: Unique identifier for the collector instance
             wikipedia_language: Language code for Wikipedia (e.g., 'en', 'fr', 'de')
         """
+        logger.debug("Initialising WikipediaCollector for %s", wikipedia_language)
+        super().__init__(source=SOURCE_TYPE, device_id=device_id)
         super().__init__(source=SOURCE_TYPE, device_id=device_id)
         self.wikipedia_language = wikipedia_language
         self.api_url = f"https://{wikipedia_language}.wikipedia.org/w/api.php"
@@ -48,6 +52,7 @@ class WikipediaCollector(BaseDataCollector):
         """
         # Format timestamps for MediaWiki API (ISO 8601 format)
         # API expects format: YYYY-MM-DDTHH:MM:SSZ
+        logger.debug("Querying Wikipedia API from %s to %s", rc_start, rc_end)
         rc_start = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
         rc_end = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -81,16 +86,19 @@ class WikipediaCollector(BaseDataCollector):
 
             # Count the number of changes returned
             if "query" in data and "recentchanges" in data["query"]:
+                logger.info("API returned %s changes", len(data["query"]["recentchanges"]))
                 return len(data["query"]["recentchanges"])
             else:
+                logger.warning("Wikipedia API response missing 'recentchanges'")
                 return 0
 
         except requests.exceptions.RequestException as e:
             # Log error but don't crash - return None to indicate failure
             print(f"[WARNING] Failed to query Wikipedia API: {e}")
+            logger.warning("Failed to query Wikipedia API: %s", e)
             return None
         except (KeyError, ValueError) as e:
-            print(f"[WARNING] Failed to parse Wikipedia API response: {e}")
+            logger.warning("Failed to parse Wikipedia API response: %s", e)
             return None
 
     def collect_data(self) -> Dict[str, Any]:
@@ -111,6 +119,7 @@ class WikipediaCollector(BaseDataCollector):
         # Calculate time window using configured collection window
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(seconds=collection_window)
+        logger.debug("Collecting edits between %s and %s", start_time.isoformat(), end_time.isoformat())
 
         # Query the API
         edit_count = self._query_recent_changes(start_time, end_time)
@@ -123,9 +132,11 @@ class WikipediaCollector(BaseDataCollector):
         if edit_count is not None:
             data["edit_count_last_minute"] = edit_count
             data["query_success"] = True
+            logger.info("Edit count for last minute: %s", edit_count)
         else:
             data["edit_count_last_minute"] = 0
             data["query_success"] = False
+            logger.warning("Edit count could not be retrieved — API query failed")
 
         return data
 
@@ -148,6 +159,7 @@ class WikipediaCollector(BaseDataCollector):
 
         # Log to console if enabled in config (simulating upload queue)
         if CONFIG.get("logging", {}).get("console_export", True):
+            logger.debug("Exporting message from %s to console", self.source)
             print(f"\n[DATA MODEL EXPORT - {self.source.upper()}]")
             print(json_output)
             print(f"[END EXPORT]\n")

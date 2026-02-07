@@ -12,6 +12,9 @@ import time
 import tomllib
 from pathlib import Path
 from pydantic import BaseModel, Field
+from sharedUtils.logger.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def load_config(config_path: str = None) -> Dict[str, Any]:
@@ -34,10 +37,14 @@ def load_config(config_path: str = None) -> Dict[str, Any]:
     else:
         config_path = Path(config_path)
 
+    logger.debug("Loading config from: %s", config_path)
+
     if not config_path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+        logger.error("Config file not found: %s", config_path)
+        raise FileNotFoundError("Configuration file not found: %s" % config_path)
 
     with open(config_path, "rb") as f:
+        logger.debug("Configuration loaded successfully")
         return tomllib.load(f)
 
 
@@ -79,7 +86,7 @@ class BaseDataCollector(ABC):
         device_id (str): identifier for the data source
     """
 
-    def __init__(self, source: str, device_id: str):
+    def __init__(self, source: str, device_id: str):        
         """
         Initialize the base data collector.
 
@@ -87,8 +94,12 @@ class BaseDataCollector(ABC):
             source: String identifier for the data source type
             device_id:  device identifier
         """
+        logger.debug("Initialised BaseDataCollector")
+
         self.source = source
         self.device_id = device_id
+
+        logger.debug("Collector init with source = %s, device_id = %s", source, device_id)
 
     @abstractmethod
     def collect_data(self) -> Dict[str, Any]:
@@ -104,6 +115,7 @@ class BaseDataCollector(ABC):
         Raises:
             NotImplementedError: If not implemented by subclass
         """
+        logger.debug("BaseDataCollector.collect_data() called — should be overridden.")
         pass
 
     @abstractmethod
@@ -135,6 +147,7 @@ class BaseDataCollector(ABC):
             DataMessage Pydantic model with validated data following the schema
         """
         data = self.collect_data()
+        logger.debug("Collected data: %s", data)
 
         # Create validated Pydantic message
         message = DataMessage(
@@ -142,9 +155,11 @@ class BaseDataCollector(ABC):
             source=self.source,
             data=data
         )
+        logger.debug("Generated message: %s", message)
 
         # Automatically export to data model
         self.export_to_data_model(message)
+        logger.debug("Message exported to data model")
 
         return message
 
