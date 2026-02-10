@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 from pydantic import BaseModel, Field
 from sharedUtils.logger.logger import get_logger
-from sharedUtils.upload_queue import UploadQueue, RedisUploadQueue
+from sharedUtils.upload_queue.manager import get_upload_queue
 
 logger = get_logger(__name__)
 
@@ -46,34 +46,6 @@ def load_config(config_path: str = None) -> Dict[str, Any]:
 
 # Load configuration at module level
 CONFIG = load_config()
-
-# Global queue instance (singleton)
-_QUEUE_INSTANCE: Optional[UploadQueue] = None
-
-
-def get_upload_queue() -> UploadQueue:
-    """
-    Get or create the global upload queue instance (singleton).
-
-    The queue is initialized based on configuration and starts automatically.
-    This ensures all collectors share the same queue instance.
-
-    Returns:
-        UploadQueue instance (RedisUploadQueue or SimpleUploadQueue based on config)
-
-    Raises:
-        ValueError: If queue implementation in config is invalid
-    """
-    global _QUEUE_INSTANCE
-
-    if _QUEUE_INSTANCE is None:
-        queue_config = CONFIG.get("upload_queue", {})
-        logger.info("Initializing RedisUploadQueue")
-        _QUEUE_INSTANCE = RedisUploadQueue(queue_config)
-        _QUEUE_INSTANCE.start()
-        logger.info("Upload queue started successfully")
-
-    return _QUEUE_INSTANCE
 
 
 class MetricEntry(BaseModel):

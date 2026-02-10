@@ -8,7 +8,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from collectors.LocalCollector import LocalDataCollector
-from collectors.base_data_collector import get_upload_queue
+from sharedUtils.upload_queue import get_upload_queue
 
 
 def test_collector_basic():

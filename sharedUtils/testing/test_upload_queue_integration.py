@@ -10,7 +10,7 @@ sys.path.insert(0, str(project_root))
 
 from collectors.LocalCollector import LocalDataCollector
 from collectors.WikipediaCollector import WikipediaCollector
-from collectors.base_data_collector import get_upload_queue
+from sharedUtils.upload_queue import get_upload_queue
 from sharedUtils.logger.logger import get_logger
 
 logger = get_logger(__name__)
