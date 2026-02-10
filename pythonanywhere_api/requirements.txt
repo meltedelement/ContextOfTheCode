@@ -1,0 +1,7 @@
+# Flask API Requirements for PythonAnywhere
+
+# Web framework
+Flask>=3.0.0
+
+# Data validation
+pydantic>=2.0.0

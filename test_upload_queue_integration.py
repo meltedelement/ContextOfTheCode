@@ -1,16 +1,4 @@
-"""
-Integration Test for Upload Queue System
-
-Tests the complete data flow from collectors to the upload queue.
-This test demonstrates:
-1. Collectors sending data to the queue
-2. Queue persisting data to Redis
-3. Worker thread attempting to upload to database API
-4. Retry logic when database is unavailable
-5. Queue statistics and monitoring
-
-Run this test with Redis running on localhost:6379
-"""
+"""Integration test for upload queue system."""
 
 import time
 import sys
@@ -29,15 +17,7 @@ logger = get_logger(__name__)
 
 
 def test_collectors_to_queue():
-    """
-    Test that collectors can send data to the upload queue.
-
-    This test:
-    1. Creates both LocalCollector and WikipediaCollector instances
-    2. Generates messages from each collector
-    3. Verifies messages are queued successfully
-    4. Shows queue statistics
-    """
+    """Test that collectors can send data to the upload queue."""
     print("\n" + "=" * 70)
     print("INTEGRATION TEST: Collectors -> Upload Queue")
     print("=" * 70)
@@ -56,7 +36,7 @@ def test_collectors_to_queue():
     print(f"  Message ID: {local_message.message_id}")
     print(f"  Device ID: {local_message.device_id}")
     print(f"  Source: {local_message.source}")
-    print(f"  Data keys: {list(local_message.data.keys())}")
+    print(f"  Metrics: {len(local_message.metrics)}")
 
     # Test 2: WikipediaCollector
     print("\n--- Test 2: WikipediaCollector ---")
@@ -71,7 +51,7 @@ def test_collectors_to_queue():
     print(f"  Message ID: {wiki_message.message_id}")
     print(f"  Device ID: {wiki_message.device_id}")
     print(f"  Source: {wiki_message.source}")
-    print(f"  Data keys: {list(wiki_message.data.keys())}")
+    print(f"  Metrics: {len(wiki_message.metrics)}")
 
     # Test 3: Queue Statistics
     print("\n--- Test 3: Queue Statistics ---")
@@ -136,13 +116,7 @@ def test_collectors_to_queue():
 
 
 def test_queue_persistence():
-    """
-    Test that the queue survives process restarts.
-
-    Run this test twice:
-    1. First run: sends messages and exits without processing
-    2. Second run: verifies messages are still in queue
-    """
+    """Test that the queue survives process restarts."""
     print("\n" + "=" * 70)
     print("PERSISTENCE TEST: Queue Crash Recovery")
     print("=" * 70)

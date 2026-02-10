@@ -1,12 +1,7 @@
-"""
-Base Data Collector Module
-
-This module provides an abstract base class for data collectors that inherit
-from it to target specific data sources (mobile, local, third_party, etc.).
-"""
+"""Base class for data collectors."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import uuid
 import time
 import tomllib
@@ -93,26 +88,19 @@ def get_upload_queue() -> UploadQueue:
     return _QUEUE_INSTANCE
 
 
+class MetricEntry(BaseModel):
+    """Single metric entry with name and value."""
+    metric_name: str
+    metric_value: float
+
+
 class DataMessage(BaseModel):
-    """
-    Pydantic model for data collector messages.
-
-    This model ensures type validation and provides automatic serialization
-    for messages sent to the upload queue. The structure follows the schema
-    defined in the configuration file.
-
-    Attributes:
-        message_id: Unique identifier for the message (auto-generated UUID)
-        timestamp: Unix timestamp when the message was created (auto-generated)
-        device_id: Identifier for the data source device
-        source: Data source type (e.g., 'mobile', 'local', 'third_party')
-        data: Dictionary containing the collected sensor/data readings
-    """
+    """Data message from collectors."""
     message_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: float = Field(default_factory=time.time)
     device_id: str
     source: str
-    data: Dict[str, Any]
+    metrics: List[MetricEntry]
 
 
 class BaseDataCollector(ABC):
@@ -160,67 +148,34 @@ class BaseDataCollector(ABC):
         pass
 
     def export_to_data_model(self, message: DataMessage) -> None:
-        """
-        Export the generated message to the upload queue.
-
-        Default implementation sends the message to the global upload queue.
-        Subclasses can override this method for custom export behavior.
-
-        Args:
-            message: DataMessage Pydantic model with metadata and collected data
-        """
-        # Get the global queue instance
+        """Export message to upload queue."""
         queue = get_upload_queue()
-
-        # Send message to queue
         success = queue.put(message)
 
         if success:
-            logger.info("Message %s queued successfully", message.message_id)
+            logger.info("Queued message %s with %d metrics", message.message_id, len(message.metrics))
         else:
             logger.error("Failed to queue message %s", message.message_id)
 
     def generate_message(self) -> DataMessage:
-        """
-        Generate a complete message with collected data.
-
-        This method calls collect_data() and wraps the result in the
-        standard message format with metadata. It automatically exports
-        the message to the data model via export_to_data_model().
-
-        Returns:
-            DataMessage Pydantic model with validated data following the schema
-        """
+        """Generate message with collected data and send to queue."""
         data = self.collect_data()
-        logger.debug("Collected data: %s", data)
 
-        # Create validated Pydantic message
+        # Convert dict to metrics list
+        metrics = [
+            MetricEntry(metric_name=key, metric_value=float(value))
+            for key, value in data.items()
+            if isinstance(value, (int, float))
+        ]
+
         message = DataMessage(
             device_id=self.device_id,
             source=self.source,
-            data=data
+            metrics=metrics
         )
-        logger.debug("Generated message: %s", message)
 
-        # Automatically export to data model
         self.export_to_data_model(message)
-        logger.debug("Message exported to data model")
-
         return message
-
-    def validate_data(self, data: Dict[str, Any]) -> bool:
-        """
-        Validate collected data structure.
-
-        Can be overridden by subclasses for custom validation logic.
-
-        Args:
-            data: The data dictionary to validate
-
-        Returns:
-            True if data is valid, False otherwise
-        """
-        return isinstance(data, dict) and len(data) > 0
 
     def __repr__(self) -> str:
         """String representation of the collector."""
