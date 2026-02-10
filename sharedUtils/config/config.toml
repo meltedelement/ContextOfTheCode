@@ -37,7 +37,7 @@ collection_window = 60
 user_agent = "WikipediaDataCollector/1.0 (Educational Project)"
 
 [upload_queue]
-# Queue implementation: "redis" or "simple"
+# Redis-based persistent upload queue
 implementation = "redis"
 
 # Redis connection settings (for RedisUploadQueue)

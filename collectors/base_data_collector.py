@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 from pydantic import BaseModel, Field
 from sharedUtils.logger.logger import get_logger
-from sharedUtils.upload_queue import UploadQueue, RedisUploadQueue, SimpleUploadQueue
+from sharedUtils.upload_queue import UploadQueue, RedisUploadQueue
 
 logger = get_logger(__name__)
 
@@ -67,21 +67,9 @@ def get_upload_queue() -> UploadQueue:
     global _QUEUE_INSTANCE
 
     if _QUEUE_INSTANCE is None:
-        # Get queue configuration
         queue_config = CONFIG.get("upload_queue", {})
-        implementation = queue_config.get("implementation", "redis")
-
-        # Create appropriate queue implementation
-        if implementation == "redis":
-            logger.info("Initializing RedisUploadQueue")
-            _QUEUE_INSTANCE = RedisUploadQueue(queue_config)
-        elif implementation == "simple":
-            logger.info("Initializing SimpleUploadQueue")
-            _QUEUE_INSTANCE = SimpleUploadQueue(queue_config)
-        else:
-            raise ValueError(f"Invalid queue implementation: {implementation}. Must be 'redis' or 'simple'")
-
-        # Start the queue
+        logger.info("Initializing RedisUploadQueue")
+        _QUEUE_INSTANCE = RedisUploadQueue(queue_config)
         _QUEUE_INSTANCE.start()
         logger.info("Upload queue started successfully")
 

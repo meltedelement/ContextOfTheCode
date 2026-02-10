@@ -18,7 +18,6 @@ import time
 import threading
 import json
 from typing import Dict, Any, TYPE_CHECKING, Optional
-from datetime import datetime
 from sharedUtils.upload_queue.base_queue import UploadQueue
 from sharedUtils.logger.logger import get_logger
 
