@@ -35,3 +35,7 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+sharedUtils/testing/logs/
+logs/
