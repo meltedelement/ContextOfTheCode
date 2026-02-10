@@ -6,13 +6,14 @@ from it to target specific data sources (mobile, local, third_party, etc.).
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import uuid
 import time
 import tomllib
 from pathlib import Path
 from pydantic import BaseModel, Field
 from sharedUtils.logger.logger import get_logger
+from sharedUtils.upload_queue import UploadQueue, RedisUploadQueue, SimpleUploadQueue
 
 logger = get_logger(__name__)
 
@@ -31,9 +32,9 @@ def load_config(config_path: str = None) -> Dict[str, Any]:
         FileNotFoundError: If config file doesn't exist
     """
     if config_path is None:
-        # Default to config/config.toml relative to project root
+        # Default to sharedUtils/config/config.toml relative to project root
         project_root = Path(__file__).parent.parent
-        config_path = project_root / "config" / "config.toml"
+        config_path = project_root / "sharedUtils" / "config" / "config.toml"
     else:
         config_path = Path(config_path)
 
@@ -50,6 +51,46 @@ def load_config(config_path: str = None) -> Dict[str, Any]:
 
 # Load configuration at module level
 CONFIG = load_config()
+
+# Global queue instance (singleton)
+_QUEUE_INSTANCE: Optional[UploadQueue] = None
+
+
+def get_upload_queue() -> UploadQueue:
+    """
+    Get or create the global upload queue instance (singleton).
+
+    The queue is initialized based on configuration and starts automatically.
+    This ensures all collectors share the same queue instance.
+
+    Returns:
+        UploadQueue instance (RedisUploadQueue or SimpleUploadQueue based on config)
+
+    Raises:
+        ValueError: If queue implementation in config is invalid
+    """
+    global _QUEUE_INSTANCE
+
+    if _QUEUE_INSTANCE is None:
+        # Get queue configuration
+        queue_config = CONFIG.get("upload_queue", {})
+        implementation = queue_config.get("implementation", "redis")
+
+        # Create appropriate queue implementation
+        if implementation == "redis":
+            logger.info("Initializing RedisUploadQueue")
+            _QUEUE_INSTANCE = RedisUploadQueue(queue_config)
+        elif implementation == "simple":
+            logger.info("Initializing SimpleUploadQueue")
+            _QUEUE_INSTANCE = SimpleUploadQueue(queue_config)
+        else:
+            raise ValueError(f"Invalid queue implementation: {implementation}. Must be 'redis' or 'simple'")
+
+        # Start the queue
+        _QUEUE_INSTANCE.start()
+        logger.info("Upload queue started successfully")
+
+    return _QUEUE_INSTANCE
 
 
 class DataMessage(BaseModel):
@@ -118,22 +159,26 @@ class BaseDataCollector(ABC):
         logger.debug("BaseDataCollector.collect_data() called — should be overridden.")
         pass
 
-    @abstractmethod
     def export_to_data_model(self, message: DataMessage) -> None:
         """
-        Export the generated message to the data model format.
+        Export the generated message to the upload queue.
 
-        This method must be implemented by subclasses to define how they
-        serialize and export their data. The message is a validated Pydantic
-        model ready for the upload queue.
+        Default implementation sends the message to the global upload queue.
+        Subclasses can override this method for custom export behavior.
 
         Args:
             message: DataMessage Pydantic model with metadata and collected data
-
-        Raises:
-            NotImplementedError: If not implemented by subclass
         """
-        pass
+        # Get the global queue instance
+        queue = get_upload_queue()
+
+        # Send message to queue
+        success = queue.put(message)
+
+        if success:
+            logger.info("Message %s queued successfully", message.message_id)
+        else:
+            logger.error("Failed to queue message %s", message.message_id)
 
     def generate_message(self) -> DataMessage:
         """

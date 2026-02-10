@@ -93,29 +93,8 @@ class LocalDataCollector(BaseDataCollector):
 
         return data
 
-    def export_to_data_model(self, message: DataMessage) -> None:
-        """
-        Export the message to the data model format.
-
-        Serializes the Pydantic message to JSON and logs it to console
-        if console_export is enabled in config. In the future, this will
-        send the message to the upload queue.
-
-        Args:
-            message: DataMessage Pydantic model with metadata and collected data
-        """
-        # Get JSON formatting from config
-        json_indent = CONFIG.get("logging", {}).get("json_indent", 2)
-
-        # Use Pydantic's built-in JSON serialization
-        json_output = message.model_dump_json(indent=json_indent)
-
-        # Log to console if enabled in config (simulating upload queue)
-        if CONFIG.get("logging", {}).get("console_export", True):
-            logger.debug("Exporting data model to console: %s", message.device_id)
-            print(f"\n[DATA MODEL EXPORT - {self.source.upper()}]")
-            print(json_output)
-            print(f"[END EXPORT]\n")
+    # Removed export_to_data_model() - now uses default implementation from BaseDataCollector
+    # which sends messages to the upload queue
 
 
 # Example usage
