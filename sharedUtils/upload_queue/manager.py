@@ -1,25 +1,15 @@
 """Queue manager for singleton upload queue instance."""
 
-from typing import Optional, Dict, Any
-import tomllib
-from pathlib import Path
+from typing import Optional
 from sharedUtils.upload_queue.base_queue import UploadQueue
 from sharedUtils.upload_queue.redis_queue import RedisUploadQueue
+from sharedUtils.config import get_upload_queue_config
 from sharedUtils.logger.logger import get_logger
 
 logger = get_logger(__name__)
 
 # Global queue instance (singleton)
 _QUEUE_INSTANCE: Optional[UploadQueue] = None
-
-
-def _load_config() -> Dict[str, Any]:
-    """Load configuration from TOML file."""
-    project_root = Path(__file__).parent.parent.parent
-    config_path = project_root / "sharedUtils" / "config" / "config.toml"
-
-    with open(config_path, "rb") as f:
-        return tomllib.load(f)
 
 
 def get_upload_queue() -> UploadQueue:
@@ -32,8 +22,7 @@ def get_upload_queue() -> UploadQueue:
     global _QUEUE_INSTANCE
 
     if _QUEUE_INSTANCE is None:
-        config = _load_config()
-        queue_config = config.get("upload_queue", {})
+        queue_config = get_upload_queue_config()
 
         logger.info("Initializing RedisUploadQueue")
         _QUEUE_INSTANCE = RedisUploadQueue(queue_config)

@@ -1,51 +1,19 @@
 """Base class for data collectors."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 import uuid
 import time
-import tomllib
-from pathlib import Path
 from pydantic import BaseModel, Field
 from sharedUtils.logger.logger import get_logger
 from sharedUtils.upload_queue.manager import get_upload_queue
+from sharedUtils.config import get_config
 
 logger = get_logger(__name__)
 
-
-def load_config(config_path: str = None) -> Dict[str, Any]:
-    """
-    Load configuration from TOML file.
-
-    Args:
-        config_path: Path to the configuration file (defaults to config/config.toml)
-
-    Returns:
-        Configuration dictionary
-
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-    """
-    if config_path is None:
-        # Default to sharedUtils/config/config.toml relative to project root
-        project_root = Path(__file__).parent.parent
-        config_path = project_root / "sharedUtils" / "config" / "config.toml"
-    else:
-        config_path = Path(config_path)
-
-    logger.debug("Loading config from: %s", config_path)
-
-    if not config_path.exists():
-        logger.error("Config file not found: %s", config_path)
-        raise FileNotFoundError("Configuration file not found: %s" % config_path)
-
-    with open(config_path, "rb") as f:
-        logger.debug("Configuration loaded successfully")
-        return tomllib.load(f)
-
-
-# Load configuration at module level
-CONFIG = load_config()
+# Config is now loaded lazily via get_config()
+# Kept for backwards compatibility
+CONFIG = get_config()
 
 
 class MetricEntry(BaseModel):

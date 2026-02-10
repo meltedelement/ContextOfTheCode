@@ -1,12 +1,13 @@
 """Wikipedia edit collector using MediaWiki Recent Changes API."""
 
-from collectors.base_data_collector import BaseDataCollector, DataMessage, CONFIG
+from collectors.base_data_collector import BaseDataCollector, DataMessage
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta, timezone
 import requests
 import sys
 import time
 from sharedUtils.logger.logger import get_logger
+from sharedUtils.config import get_wikipedia_config, get_collector_config
 
 # Constants
 logger = get_logger(__name__)
@@ -45,7 +46,7 @@ class WikipediaCollector(BaseDataCollector):
         }
 
         try:
-            user_agent = CONFIG.get("wikipedia", {}).get(
+            user_agent = get_wikipedia_config().get(
                 "user_agent",
                 "WikipediaDataCollector/1.0 (Educational Project)"
             )
@@ -77,7 +78,7 @@ class WikipediaCollector(BaseDataCollector):
 
     def collect_data(self) -> Dict[str, Any]:
         """Collect Wikipedia edit count for the configured time window."""
-        collection_window = CONFIG.get("wikipedia", {}).get("collection_window", 60)
+        collection_window = get_wikipedia_config().get("collection_window", 60)
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(seconds=collection_window)
 
@@ -102,7 +103,7 @@ if __name__ == "__main__":
     print("Press Ctrl+C to stop\n")
 
     try:
-        poll_interval = CONFIG.get("collectors", {}).get("default_interval", 60)
+        poll_interval = get_collector_config().get("default_interval", 60)
         while True:
             message = collector.generate_message()
 

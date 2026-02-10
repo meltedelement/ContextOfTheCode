@@ -1,9 +1,10 @@
 """Local system metrics collector (CPU, RAM, temperature)."""
 
-from collectors.base_data_collector import BaseDataCollector, DataMessage, CONFIG
+from collectors.base_data_collector import BaseDataCollector, DataMessage
 from typing import Dict, Any, Optional
 import psutil
 from sharedUtils.logger.logger import get_logger
+from sharedUtils.config import get_collector_config
 
 
 # Constants
@@ -22,7 +23,7 @@ class LocalDataCollector(BaseDataCollector):
 
     def _get_cpu_temperature(self) -> Optional[float]:
         """Get CPU temperature in Celsius, or None if unavailable."""
-        precision = CONFIG.get("collectors", {}).get("metric_precision", 1)
+        precision = get_collector_config().get("metric_precision", 1)
 
         if hasattr(psutil, "sensors_temperatures"):
             temps = psutil.sensors_temperatures()
@@ -37,8 +38,9 @@ class LocalDataCollector(BaseDataCollector):
 
     def collect_data(self) -> Dict[str, Any]:
         """Collect system metrics (CPU, RAM, temperature)."""
-        precision = CONFIG.get("collectors", {}).get("metric_precision", 1)
-        cpu_interval = CONFIG.get("collectors", {}).get("cpu_sample_interval", 1.0)
+        config = get_collector_config()
+        precision = config.get("metric_precision", 1)
+        cpu_interval = config.get("cpu_sample_interval", 1.0)
 
         memory = psutil.virtual_memory()
         cpu_percent = psutil.cpu_percent(interval=cpu_interval)
