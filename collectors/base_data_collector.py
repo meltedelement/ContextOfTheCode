@@ -6,7 +6,7 @@ from it to target specific data sources (mobile, local, third_party, etc.).
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Any, List
 import uuid
 import time
 import tomllib
@@ -22,7 +22,7 @@ def load_config(config_path: str = None) -> Dict[str, Any]:
     Load configuration from TOML file.
 
     Args:
-        config_path: Path to the configuration file (defaults to config/config.toml)
+        config_path: Path to the configuration file (defaults to sharedUtils/config/config.toml)
 
     Returns:
         Configuration dictionary
@@ -52,26 +52,43 @@ def load_config(config_path: str = None) -> Dict[str, Any]:
 CONFIG = load_config()
 
 
+class MetricEntry(BaseModel):
+    """
+    A single metric reading with an enforced float value.
+
+    Using a structured entry rather than a freeform dict ensures that
+    all metric values are floats — no strings or booleans can sneak in.
+    This also maps cleanly to a normalised database table later
+    (one row per metric per reading).
+
+    Attributes:
+        metric_name: Identifier for the metric (e.g., 'ram_usage_percent')
+        metric_value: The measured value, always a float
+    """
+    metric_name: str
+    metric_value: float
+
+
 class DataMessage(BaseModel):
     """
     Pydantic model for data collector messages.
 
     This model ensures type validation and provides automatic serialization
-    for messages sent to the upload queue. The structure follows the schema
-    defined in the configuration file.
+    for messages sent to the upload queue. All metric values are enforced
+    as floats via MetricEntry to avoid mixed-type complexity.
 
     Attributes:
         message_id: Unique identifier for the message (auto-generated UUID)
         timestamp: Unix timestamp when the message was created (auto-generated)
         device_id: Identifier for the data source device
         source: Data source type (e.g., 'mobile', 'local', 'third_party')
-        data: Dictionary containing the collected sensor/data readings
+        metrics: List of MetricEntry objects with float-only values
     """
     message_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: float = Field(default_factory=time.time)
     device_id: str
     source: str
-    data: Dict[str, Any]
+    metrics: List[MetricEntry]
 
 
 class BaseDataCollector(ABC):
@@ -102,15 +119,15 @@ class BaseDataCollector(ABC):
         logger.debug("Collector init with source = %s, device_id = %s", source, device_id)
 
     @abstractmethod
-    def collect_data(self) -> Dict[str, Any]:
+    def collect_data(self) -> List[MetricEntry]:
         """
         Collect data from the specific source.
 
         This method must be implemented by subclasses to define how data
-        is collected from their specific source.
+        is collected from their specific source. All values must be floats.
 
         Returns:
-            Dictionary containing the collected sensor/data readings
+            List of MetricEntry objects with float-only values
 
         Raises:
             NotImplementedError: If not implemented by subclass
@@ -146,16 +163,16 @@ class BaseDataCollector(ABC):
         Returns:
             DataMessage Pydantic model with validated data following the schema
         """
-        data = self.collect_data()
-        logger.debug("Collected data: %s", data)
+        metrics = self.collect_data()
+        logger.debug("Collected %d metrics", len(metrics))
 
-        # Create validated Pydantic message
+        # Create validated Pydantic message — MetricEntry enforces float values
         message = DataMessage(
             device_id=self.device_id,
             source=self.source,
-            data=data
+            metrics=metrics
         )
-        logger.debug("Generated message: %s", message)
+        logger.debug("Generated message: %s", message.message_id)
 
         # Automatically export to data model
         self.export_to_data_model(message)
@@ -163,19 +180,19 @@ class BaseDataCollector(ABC):
 
         return message
 
-    def validate_data(self, data: Dict[str, Any]) -> bool:
+    def validate_metrics(self, metrics: List[MetricEntry]) -> bool:
         """
-        Validate collected data structure.
+        Validate collected metrics.
 
         Can be overridden by subclasses for custom validation logic.
 
         Args:
-            data: The data dictionary to validate
+            metrics: The list of MetricEntry objects to validate
 
         Returns:
-            True if data is valid, False otherwise
+            True if metrics are valid, False otherwise
         """
-        return isinstance(data, dict) and len(data) > 0
+        return isinstance(metrics, list) and len(metrics) > 0
 
     def __repr__(self) -> str:
         """String representation of the collector."""
