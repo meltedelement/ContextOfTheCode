@@ -7,5 +7,5 @@ requests>=2.31.0         # HTTP client for API calls
 redis>=5.0.0             # For persistent upload queue
 
 # Future dependencies (uncomment when needed)
-# flask>=3.0.0           # For aggregator API
-# sqlalchemy>=2.0.0      # For database operations
+flask>=3.0.0           # For aggregator API
+sqlalchemy>=2.0.0      # For database operations
