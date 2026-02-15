@@ -17,8 +17,9 @@ import requests
 import time
 import threading
 import json
-from typing import Dict, Any, TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Dict, Any
 from sharedUtils.upload_queue.base_queue import UploadQueue
+from sharedUtils.config.models import UploadQueueConfig
 from sharedUtils.logger.logger import get_logger
 
 if TYPE_CHECKING:
@@ -50,40 +51,40 @@ class RedisUploadQueue(UploadQueue):
     RETRY_QUEUE = "metrics:retry"
     FAILED_QUEUE = "metrics:failed"
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: UploadQueueConfig):
         """
         Initialize the Redis upload queue.
 
         Args:
-            config: Configuration dictionary with keys:
-                - redis_host: Redis server hostname (default: localhost)
-                - redis_port: Redis server port (default: 6379)
-                - redis_db: Redis database number (default: 0)
+            config: Typed configuration with validated settings:
+                - redis_host: Redis server hostname
+                - redis_port: Redis server port
+                - redis_db: Redis database number
                 - redis_password: Redis password (optional)
                 - api_endpoint: URL to POST messages to
                 - api_key: API key for authentication (optional)
-                - timeout: Request timeout in seconds (default: 10)
-                - max_retry_attempts: Max retries per message (default: 5)
-                - backoff_base: Base delay for exponential backoff in seconds (default: 1)
-                - backoff_multiplier: Multiplier for exponential backoff (default: 2)
-                - worker_sleep: Worker sleep time when queue is empty in seconds (default: 1)
+                - timeout: Request timeout in seconds
+                - max_retry_attempts: Max retries per message
+                - backoff_base: Base delay for exponential backoff in seconds
+                - backoff_multiplier: Multiplier for exponential backoff
+                - worker_sleep: Worker sleep time when queue is empty in seconds
         """
         # Redis connection settings
-        self.redis_host = config.get('redis_host', 'localhost')
-        self.redis_port = config.get('redis_port', 6379)
-        self.redis_db = config.get('redis_db', 0)
-        self.redis_password = config.get('redis_password')
+        self.redis_host = config.redis_host
+        self.redis_port = config.redis_port
+        self.redis_db = config.redis_db
+        self.redis_password = config.redis_password
 
         # API settings
-        self.api_endpoint = config.get('api_endpoint')
-        self.api_key = config.get('api_key')
-        self.timeout = config.get('timeout', 10)
+        self.api_endpoint = config.api_endpoint
+        self.api_key = config.api_key
+        self.timeout = config.timeout
 
         # Retry policy settings
-        self.max_retry_attempts = config.get('max_retry_attempts', 5)
-        self.backoff_base = config.get('backoff_base', 1)
-        self.backoff_multiplier = config.get('backoff_multiplier', 2)
-        self.worker_sleep = config.get('worker_sleep', 1)
+        self.max_retry_attempts = config.max_retry_attempts
+        self.backoff_base = config.backoff_base
+        self.backoff_multiplier = config.backoff_multiplier
+        self.worker_sleep = config.worker_sleep
 
         # Runtime state
         self.redis_client: Optional[redis.Redis] = None

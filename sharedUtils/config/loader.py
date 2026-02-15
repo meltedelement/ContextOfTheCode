@@ -4,11 +4,20 @@ from typing import Dict, Any, Optional
 import tomllib
 from pathlib import Path
 from sharedUtils.logger.logger import get_logger
+from sharedUtils.config.models import (
+    AppConfig,
+    CollectorsConfig,
+    WikipediaConfig,
+    UploadQueueConfig,
+    LoggingConfig,
+    DataModelConfig,
+)
 
 logger = get_logger(__name__)
 
 # Global config cache (singleton)
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_TYPED_CONFIG_CACHE: Optional[AppConfig] = None
 
 
 def get_config() -> Dict[str, Any]:
@@ -42,26 +51,50 @@ def get_config() -> Dict[str, Any]:
     return _CONFIG_CACHE
 
 
-def get_collector_config() -> dict:
-    """Get collector configuration section."""
-    return get_config().get("collectors", {})
+def get_typed_config() -> AppConfig:
+    """
+    Get typed configuration (lazy-loaded singleton with validation).
+
+    Loads config from sharedUtils/config/config.toml on first access,
+    validates it using Pydantic models, and caches it for subsequent calls.
+
+    Returns:
+        Validated AppConfig instance with type-safe access
+
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        ValidationError: If config doesn't match expected schema
+    """
+    global _TYPED_CONFIG_CACHE
+
+    if _TYPED_CONFIG_CACHE is None:
+        config_dict = get_config()  # Reuse dict loading logic
+        _TYPED_CONFIG_CACHE = AppConfig(**config_dict)
+        logger.debug("Configuration validated with Pydantic models")
+
+    return _TYPED_CONFIG_CACHE
 
 
-def get_wikipedia_config() -> dict:
-    """Get Wikipedia configuration section."""
-    return get_config().get("wikipedia", {})
+def get_collector_config() -> CollectorsConfig:
+    """Get typed collector configuration section."""
+    return get_typed_config().collectors
 
 
-def get_upload_queue_config() -> dict:
-    """Get upload queue configuration section."""
-    return get_config().get("upload_queue", {})
+def get_wikipedia_config() -> WikipediaConfig:
+    """Get typed Wikipedia configuration section."""
+    return get_typed_config().wikipedia
 
 
-def get_logging_config() -> dict:
-    """Get logging configuration section."""
-    return get_config().get("logging", {})
+def get_upload_queue_config() -> UploadQueueConfig:
+    """Get typed upload queue configuration section."""
+    return get_typed_config().upload_queue
 
 
-def get_data_model_config() -> dict:
-    """Get data model configuration section."""
-    return get_config().get("data_model", {})
+def get_logging_config() -> LoggingConfig:
+    """Get typed logging configuration section."""
+    return get_typed_config().logging
+
+
+def get_data_model_config() -> DataModelConfig:
+    """Get typed data model configuration section."""
+    return get_typed_config().data_model

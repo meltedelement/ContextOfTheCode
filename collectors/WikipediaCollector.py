@@ -46,10 +46,7 @@ class WikipediaCollector(BaseDataCollector):
         }
 
         try:
-            user_agent = get_wikipedia_config().get(
-                "user_agent",
-                "WikipediaDataCollector/1.0 (Educational Project)"
-            )
+            user_agent = get_wikipedia_config().user_agent
 
             response = requests.get(
                 self.api_url,
@@ -78,7 +75,7 @@ class WikipediaCollector(BaseDataCollector):
 
     def collect_data(self) -> Dict[str, Any]:
         """Collect Wikipedia edit count for the configured time window."""
-        collection_window = get_wikipedia_config().get("collection_window", 60)
+        collection_window = get_wikipedia_config().collection_window
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(seconds=collection_window)
 
@@ -103,7 +100,7 @@ if __name__ == "__main__":
     print("Press Ctrl+C to stop\n")
 
     try:
-        poll_interval = get_collector_config().get("default_interval", 60)
+        poll_interval = get_collector_config().default_interval
         while True:
             message = collector.generate_message()
 
