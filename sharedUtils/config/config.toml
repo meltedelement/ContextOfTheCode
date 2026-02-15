@@ -17,8 +17,9 @@ json_indent = 2
 schema_path = "data_model.json"
 
 [collectors]
-# Default collection interval in seconds
+# Default collection interval in seconds (fallback if not specified per-collector)
 default_interval = 60
+default_collection_interval = 60
 
 # Enable/disable specific collector types
 enabled_collectors = ["local", "mobile", "third_party"]
@@ -29,7 +30,14 @@ cpu_sample_interval = 1.0
 # Decimal precision for rounding metrics
 metric_precision = 1
 
-[wikipedia]
+[local_collector]
+# How often to collect local system metrics (seconds)
+collection_interval = 10
+
+[wikipedia_collector]
+# How often to collect Wikipedia metrics (seconds)
+collection_interval = 60
+
 # Time window in seconds for collecting edit counts
 collection_window = 60
 

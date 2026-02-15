@@ -7,7 +7,8 @@ from sharedUtils.logger.logger import get_logger
 from sharedUtils.config.models import (
     AppConfig,
     CollectorsConfig,
-    WikipediaConfig,
+    LocalCollectorConfig,
+    WikipediaCollectorConfig,
     UploadQueueConfig,
     LoggingConfig,
     DataModelConfig,
@@ -76,13 +77,18 @@ def get_typed_config() -> AppConfig:
 
 
 def get_collector_config() -> CollectorsConfig:
-    """Get typed collector configuration section."""
+    """Get typed collector configuration section (shared settings)."""
     return get_typed_config().collectors
 
 
-def get_wikipedia_config() -> WikipediaConfig:
-    """Get typed Wikipedia configuration section."""
-    return get_typed_config().wikipedia
+def get_local_collector_config() -> LocalCollectorConfig:
+    """Get typed local collector configuration section."""
+    return get_typed_config().local_collector
+
+
+def get_wikipedia_collector_config() -> WikipediaCollectorConfig:
+    """Get typed Wikipedia collector configuration section."""
+    return get_typed_config().wikipedia_collector
 
 
 def get_upload_queue_config() -> UploadQueueConfig:

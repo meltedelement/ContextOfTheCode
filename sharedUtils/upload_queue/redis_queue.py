@@ -321,8 +321,9 @@ class RedisUploadQueue(UploadQueue):
                     timeout=self.timeout
                 )
 
-                if response.status_code == 200:
-                    logger.info("Successfully uploaded message %s", message_id)
+                # Accept any 2xx status code as success (200, 201, 204, etc.)
+                if 200 <= response.status_code < 300:
+                    logger.info("Successfully uploaded message %s (HTTP %d)", message_id, response.status_code)
                     return True
                 else:
                     logger.warning("Upload failed for message %s: HTTP %d - %s",

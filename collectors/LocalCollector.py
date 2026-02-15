@@ -4,7 +4,7 @@ from collectors.base_data_collector import BaseDataCollector, DataMessage
 from typing import Dict, Any, Optional
 import psutil
 from sharedUtils.logger.logger import get_logger
-from sharedUtils.config import get_collector_config
+from sharedUtils.config import get_collector_config, get_local_collector_config
 
 
 # Constants
@@ -19,7 +19,15 @@ class LocalDataCollector(BaseDataCollector):
 
     def __init__(self, device_id: str):
         """Initialize local data collector."""
-        super().__init__(source=SOURCE_TYPE, device_id=device_id)
+        # Load collector-specific config
+        config = get_local_collector_config()
+
+        # Initialize base with collection interval
+        super().__init__(
+            source=SOURCE_TYPE,
+            device_id=device_id,
+            collection_interval=config.collection_interval
+        )
 
     def _get_cpu_temperature(self) -> Optional[float]:
         """Get CPU temperature in Celsius, or None if unavailable."""

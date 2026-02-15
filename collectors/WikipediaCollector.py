@@ -7,7 +7,7 @@ import requests
 import sys
 import time
 from sharedUtils.logger.logger import get_logger
-from sharedUtils.config import get_wikipedia_config, get_collector_config
+from sharedUtils.config import get_wikipedia_collector_config, get_collector_config
 
 # Constants
 logger = get_logger(__name__)
@@ -23,7 +23,16 @@ class WikipediaCollector(BaseDataCollector):
 
     def __init__(self, device_id: str, wikipedia_language: str = DEFAULT_LANGUAGE):
         """Initialize Wikipedia edit collector."""
-        super().__init__(source=SOURCE_TYPE, device_id=device_id)
+        # Load collector-specific config
+        config = get_wikipedia_collector_config()
+
+        # Initialize base with collection interval
+        super().__init__(
+            source=SOURCE_TYPE,
+            device_id=device_id,
+            collection_interval=config.collection_interval
+        )
+
         self.wikipedia_language = wikipedia_language
         self.api_url = f"https://{wikipedia_language}.wikipedia.org/w/api.php"
         logger.debug("WikipediaCollector initialized for %s", wikipedia_language)
@@ -46,7 +55,7 @@ class WikipediaCollector(BaseDataCollector):
         }
 
         try:
-            user_agent = get_wikipedia_config().user_agent
+            user_agent = get_wikipedia_collector_config().user_agent
 
             response = requests.get(
                 self.api_url,
@@ -75,7 +84,7 @@ class WikipediaCollector(BaseDataCollector):
 
     def collect_data(self) -> Dict[str, Any]:
         """Collect Wikipedia edit count for the configured time window."""
-        collection_window = get_wikipedia_config().collection_window
+        collection_window = get_wikipedia_collector_config().collection_window
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(seconds=collection_window)
 

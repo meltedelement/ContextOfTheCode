@@ -27,17 +27,18 @@ class DataModelConfig(BaseModel):
 
 
 class CollectorsConfig(BaseModel):
-    """Configuration for data collectors."""
+    """Configuration for data collectors (shared settings)."""
     default_interval: int = Field(default=60, description="Collection interval in seconds")
+    default_collection_interval: int = Field(default=60, description="Default collection interval fallback")
     enabled_collectors: List[str] = Field(default_factory=list, description="Enabled collector types")
     cpu_sample_interval: float = Field(default=1.0, description="CPU sampling interval in seconds")
     metric_precision: int = Field(default=1, description="Decimal precision for metrics")
 
-    @field_validator("default_interval")
+    @field_validator("default_interval", "default_collection_interval")
     @classmethod
     def validate_interval(cls, v: int) -> int:
         if v < 1:
-            raise ValueError("default_interval must be at least 1 second")
+            raise ValueError("interval must be at least 1 second")
         return v
 
     @field_validator("metric_precision")
@@ -48,16 +49,29 @@ class CollectorsConfig(BaseModel):
         return v
 
 
-class WikipediaConfig(BaseModel):
+class LocalCollectorConfig(BaseModel):
+    """Configuration for local system collector."""
+    collection_interval: int = Field(default=10, description="Collection interval in seconds")
+
+    @field_validator("collection_interval")
+    @classmethod
+    def validate_interval(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("collection_interval must be at least 1 second")
+        return v
+
+
+class WikipediaCollectorConfig(BaseModel):
     """Configuration for Wikipedia collector."""
+    collection_interval: int = Field(default=60, description="Collection interval in seconds")
     collection_window: int = Field(default=60, description="Time window in seconds")
     user_agent: str = Field(description="User-Agent for API requests")
 
-    @field_validator("collection_window")
+    @field_validator("collection_interval", "collection_window")
     @classmethod
-    def validate_window(cls, v: int) -> int:
+    def validate_intervals(cls, v: int) -> int:
         if v < 1:
-            raise ValueError("collection_window must be at least 1 second")
+            raise ValueError("interval must be at least 1 second")
         return v
 
 
@@ -96,5 +110,6 @@ class AppConfig(BaseModel):
     logging: LoggingConfig
     data_model: DataModelConfig
     collectors: CollectorsConfig
-    wikipedia: WikipediaConfig
+    local_collector: LocalCollectorConfig
+    wikipedia_collector: WikipediaCollectorConfig
     upload_queue: UploadQueueConfig
