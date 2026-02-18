@@ -5,11 +5,28 @@ A production-grade queue implementation using Redis for persistent message stora
 This queue survives crashes/restarts and handles retries with exponential backoff.
 
 Architecture:
-- Redis List (metrics:pending) for main queue
-- Redis Sorted Set (metrics:retry) for delayed retries with timestamps
-- Background worker thread continuously processes messages
-- Exponential backoff for failed uploads
-- Persistent storage survives crashes
+- Redis List (metrics:pending): main FIFO queue of message envelopes
+- Redis Sorted Set (metrics:retry): deferred retries, scored by future Unix timestamp
+- Redis List (metrics:failed): envelopes that exhausted all retry attempts
+- Background worker thread continuously processes messages without blocking
+
+Message Envelope:
+    Messages are stored as JSON envelopes wrapping the raw DataMessage payload:
+    {
+        "retry_count": int,         # number of failed attempts so far
+        "first_queued_at": float,   # Unix timestamp when first enqueued
+        "last_error": str | None,   # error string from the most recent failure
+        "payload": str              # DataMessage serialised as a JSON string
+    }
+    The envelope is internal to this module — callers interact only with DataMessage.
+
+Retry Flow:
+    1. put() wraps DataMessage in envelope (retry_count=0) → metrics:pending
+    2. Worker pops envelope, calls _attempt_upload() once (no blocking sleep)
+    3. Success → done
+    4. Failure, retries remaining → zadd to metrics:retry with score=now+backoff_delay
+    5. Failure, retries exhausted → lpush to metrics:failed
+    6. Worker polls metrics:retry each loop; expired entries move back to metrics:pending
 """
 
 import redis
@@ -165,6 +182,9 @@ class RedisUploadQueue(UploadQueue):
         """
         Add a message to the Redis queue (non-blocking).
 
+        Wraps the DataMessage in an envelope that carries retry metadata.
+        The envelope is internal to the queue — callers interact only with DataMessage.
+
         Args:
             message: DataMessage object to queue
 
@@ -176,11 +196,17 @@ class RedisUploadQueue(UploadQueue):
             return False
 
         try:
-            # Serialize message to JSON using Pydantic
-            json_data = message.model_dump_json()
+            # Wrap the message in an envelope that tracks retry state
+            envelope = {
+                "retry_count": 0,
+                "first_queued_at": time.time(),
+                "last_error": None,
+                "payload": message.model_dump_json()
+            }
+            envelope_json = json.dumps(envelope)
 
-            # Push to Redis list (LPUSH adds to left/head, RPOP removes from right/tail = FIFO)
-            self.redis_client.lpush(self.PENDING_QUEUE, json_data)
+            # Push to Redis list (LPUSH adds to left/head, BRPOP removes from right/tail = FIFO)
+            self.redis_client.lpush(self.PENDING_QUEUE, envelope_json)
 
             logger.debug("Queued message %s to Redis", message.message_id)
             return True
@@ -226,29 +252,37 @@ class RedisUploadQueue(UploadQueue):
         """
         Process the retry queue by checking for messages ready to retry.
 
-        Uses Redis Sorted Set with timestamp as score. Messages with
-        score <= current time are ready to retry.
+        Uses Redis Sorted Set with a future Unix timestamp as score. Messages
+        whose score <= current time have passed their backoff delay and are moved
+        back to the pending queue for their next upload attempt.
         """
         try:
             current_time = time.time()
 
-            # Get all messages ready to retry (score <= current_time)
+            # Get up to 10 messages whose retry time has passed
             ready_messages = self.redis_client.zrangebyscore(
                 self.RETRY_QUEUE,
                 min=0,
                 max=current_time,
                 start=0,
-                num=10  # Process up to 10 at a time
+                num=10
             )
 
-            for message_json in ready_messages:
-                # Remove from retry queue
-                self.redis_client.zrem(self.RETRY_QUEUE, message_json)
+            for envelope_json in ready_messages:
+                # Remove from retry sorted set
+                self.redis_client.zrem(self.RETRY_QUEUE, envelope_json)
 
-                # Add back to pending queue
-                self.redis_client.lpush(self.PENDING_QUEUE, message_json)
+                # Move back to pending queue for the next attempt
+                self.redis_client.lpush(self.PENDING_QUEUE, envelope_json)
 
-                logger.debug("Moved message from retry queue back to pending")
+                try:
+                    envelope = json.loads(envelope_json)
+                    payload_dict = json.loads(envelope.get("payload", "{}"))
+                    message_id = payload_dict.get("message_id", "unknown")
+                    logger.debug("Message %s moved from retry queue to pending (retry_count=%d)",
+                                 message_id, envelope.get("retry_count", "?"))
+                except (json.JSONDecodeError, TypeError):
+                    logger.debug("Moved message from retry queue to pending")
 
         except redis.RedisError as e:
             logger.error("Error processing retry queue: %s", str(e))
@@ -257,31 +291,67 @@ class RedisUploadQueue(UploadQueue):
         """
         Process one message from the pending queue.
 
+        Pops an envelope, makes a single upload attempt, then routes:
+        - Success: message is done
+        - Failure, retries remaining: schedule in RETRY_QUEUE sorted set with
+          exponential backoff delay as the score (future Unix timestamp)
+        - Failure, retries exhausted: move envelope to FAILED_QUEUE
+
         Returns:
             True if a message was processed, False if queue was empty
         """
         try:
-            # Pop one message from the right (FIFO: LPUSH + RPOP)
-            # Use blocking pop with timeout to avoid busy-waiting
+            # Pop one message from the right (FIFO: LPUSH + BRPOP)
             result = self.redis_client.brpop(self.PENDING_QUEUE, timeout=1)
 
             if not result:
                 return False  # Queue is empty
 
-            # result is a tuple: (queue_name, message_json)
-            _, message_json = result
+            # result is a tuple: (queue_name, envelope_json)
+            _, envelope_json = result
+            envelope = json.loads(envelope_json)
 
-            # Parse message
-            message_dict = json.loads(message_json)
-            message_id = message_dict.get('message_id', 'unknown')
+            retry_count = envelope.get("retry_count", 0)
+            payload_json = envelope.get("payload", envelope_json)  # fallback for legacy raw messages
 
-            # Attempt upload with retries
-            success = self._upload_with_retry(message_json, message_id)
+            # Extract message_id from the payload for logging
+            try:
+                payload_dict = json.loads(payload_json)
+                message_id = payload_dict.get("message_id", "unknown")
+            except (json.JSONDecodeError, TypeError):
+                message_id = "unknown"
 
-            if not success:
-                # All retries failed - move to failed queue
-                self.redis_client.lpush(self.FAILED_QUEUE, message_json)
-                logger.error("Message %s moved to failed queue after exhausting retries", message_id)
+            attempt_number = retry_count + 1
+            logger.debug("Processing message %s (attempt %d/%d)",
+                         message_id, attempt_number, self.max_retry_attempts)
+
+            success, error = self._attempt_upload(payload_json, message_id)
+
+            if success:
+                return True
+
+            # Upload failed — update envelope with failure info
+            retry_count += 1
+            envelope["retry_count"] = retry_count
+            envelope["last_error"] = error
+
+            if retry_count >= self.max_retry_attempts:
+                # Retries exhausted — move to failed queue
+                self.redis_client.lpush(self.FAILED_QUEUE, json.dumps(envelope))
+                logger.error(
+                    "Message %s moved to failed queue after %d attempts. Last error: %s",
+                    message_id, retry_count, error
+                )
+            else:
+                # Schedule a deferred retry in the sorted set
+                # score = future Unix timestamp when the message becomes eligible again
+                delay = self.backoff_base * (self.backoff_multiplier ** (retry_count - 1))
+                retry_at = time.time() + delay
+                self.redis_client.zadd(self.RETRY_QUEUE, {json.dumps(envelope): retry_at})
+                logger.warning(
+                    "Message %s scheduled for retry %d/%d in %.0fs",
+                    message_id, retry_count, self.max_retry_attempts, delay
+                )
 
             return True
 
@@ -289,73 +359,60 @@ class RedisUploadQueue(UploadQueue):
             logger.error("Error processing pending queue: %s", str(e))
             return False
         except json.JSONDecodeError as e:
-            logger.error("Failed to parse message JSON: %s", str(e))
-            return True  # Consume the bad message
+            logger.error("Failed to parse envelope JSON: %s", str(e))
+            return True  # Consume the malformed message
         except Exception as e:
             logger.error("Unexpected error processing message: %s", str(e))
             return False
 
-    def _upload_with_retry(self, message_json: str, message_id: str) -> bool:
+    def _attempt_upload(self, payload_json: str, message_id: str) -> tuple[bool, Optional[str]]:
         """
-        Attempt to upload a message with exponential backoff retries.
+        Make a single upload attempt for a message.
+
+        Does not retry — retry scheduling is handled by the caller via the
+        RETRY_QUEUE sorted set so the worker thread is never blocked.
 
         Args:
-            message_json: Serialized JSON message
+            payload_json: Serialized DataMessage JSON string (the envelope payload)
             message_id: Message ID for logging
 
         Returns:
-            True if upload succeeded, False if all retries failed
+            Tuple of (success, error_string). error_string is None on success.
         """
         if not self.api_endpoint:
             logger.warning("No api_endpoint - cannot upload message %s", message_id)
-            return False
+            return False, "No api_endpoint configured"
 
-        for attempt in range(1, self.max_retry_attempts + 1):
-            try:
-                logger.debug("Uploading message %s (attempt %d/%d)",
-                           message_id, attempt, self.max_retry_attempts)
+        try:
+            response = self.session.post(
+                self.api_endpoint,
+                data=payload_json,
+                timeout=self.timeout
+            )
 
-                response = self.session.post(
-                    self.api_endpoint,
-                    data=message_json,
-                    timeout=self.timeout
-                )
+            # Accept any 2xx status code as success (200, 201, 204, etc.)
+            if 200 <= response.status_code < 300:
+                logger.info("Successfully uploaded message %s (HTTP %d)", message_id, response.status_code)
+                return True, None
+            else:
+                error = f"HTTP {response.status_code}: {response.text[:200]}"
+                logger.warning("Upload failed for message %s: %s", message_id, error)
+                return False, error
 
-                # Accept any 2xx status code as success (200, 201, 204, etc.)
-                if 200 <= response.status_code < 300:
-                    logger.info("Successfully uploaded message %s (HTTP %d)", message_id, response.status_code)
-                    return True
-                else:
-                    logger.warning("Upload failed for message %s: HTTP %d - %s",
-                                 message_id, response.status_code, response.text[:200])
+        except requests.exceptions.Timeout:
+            error = "Request timed out"
+            logger.warning("Timeout uploading message %s", message_id)
+            return False, error
 
-            except requests.exceptions.Timeout:
-                logger.warning("Timeout uploading message %s (attempt %d/%d)",
-                             message_id, attempt, self.max_retry_attempts)
+        except requests.exceptions.ConnectionError as e:
+            error = f"ConnectionError: {str(e)}"
+            logger.warning("Connection error uploading message %s: %s", message_id, str(e))
+            return False, error
 
-            except requests.exceptions.ConnectionError as e:
-                logger.warning("Connection error uploading message %s (attempt %d/%d): %s",
-                             message_id, attempt, self.max_retry_attempts, str(e))
-
-            except Exception as e:
-                logger.error("Unexpected error uploading message %s: %s", message_id, str(e))
-                break  # Don't retry on unexpected errors
-
-            # Exponential backoff before next retry
-            if attempt < self.max_retry_attempts:
-                delay = self.backoff_base * (self.backoff_multiplier ** (attempt - 1))
-                logger.debug("Waiting %s seconds before retry...", delay)
-
-                # Sleep in small chunks to allow graceful shutdown
-                sleep_remaining = delay
-                while sleep_remaining > 0 and self.running:
-                    time.sleep(min(0.5, sleep_remaining))
-                    sleep_remaining -= 0.5
-
-        # All retries failed
-        logger.error("Failed to upload message %s after %d attempts",
-                   message_id, self.max_retry_attempts)
-        return False
+        except Exception as e:
+            error = f"Unexpected error: {str(e)}"
+            logger.error("Unexpected error uploading message %s: %s", message_id, str(e))
+            return False, error
 
     def get_stats(self) -> Dict[str, int]:
         """

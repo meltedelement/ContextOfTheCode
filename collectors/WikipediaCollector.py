@@ -15,7 +15,6 @@ SOURCE_TYPE = "wikipedia"  # Source identifier for Wikipedia collector
 DEFAULT_LANGUAGE = "en"  # Default to English Wikipedia
 API_TIMEOUT = 10  # HTTP request timeout in seconds
 NAMESPACE_ARTICLES = 0  # Namespace 0 = article pages (not talk pages, etc.)
-ISO_UTC_SUFFIX = "Z"  # UTC timezone suffix for ISO 8601 timestamps
 
 
 class WikipediaCollector(BaseDataCollector):
@@ -91,10 +90,7 @@ class WikipediaCollector(BaseDataCollector):
         edit_count = self._query_recent_changes(start_time, end_time)
 
         return {
-            "wikipedia_language": self.wikipedia_language,
-            "query_timestamp": end_time.isoformat() + ISO_UTC_SUFFIX,
             "edit_count_last_minute": edit_count if edit_count is not None else 0,
-            "query_success": edit_count is not None,
         }
 
 
@@ -113,18 +109,15 @@ if __name__ == "__main__":
         while True:
             message = collector.generate_message()
 
-            # Extract edit count from metrics
             edit_count = next(
                 (m.metric_value for m in message.metrics if m.metric_name == "edit_count_last_minute"),
-                0
-            )
-            query_success = next(
-                (m.metric_value for m in message.metrics if m.metric_name == "query_success"),
-                0
+                None
             )
 
-            status = "✓" if query_success else "✗"
-            print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {status} Edits: {int(edit_count)}")
+            if edit_count is not None:
+                print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Edits: {int(edit_count)}")
+            else:
+                print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] No data")
             time.sleep(poll_interval)
     except KeyboardInterrupt:
         print("\nStopped")
