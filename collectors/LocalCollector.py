@@ -63,7 +63,7 @@ class LocalDataCollector(BaseDataCollector):
         if cpu_temp is not None:
             data["cpu_temp_celsius"] = cpu_temp
 
-        return metrics
+        return data
 
 
 if __name__ == "__main__":

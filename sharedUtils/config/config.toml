@@ -55,7 +55,7 @@ redis_db = 0
 # redis_password = "your_password_here"  # Uncomment if Redis requires authentication
 
 # Database API endpoint (where messages are uploaded)
-api_endpoint = "http://localhost:5000/api/metrics"
+api_endpoint = "http://200.69.13.70:5000/api/metrics"
 # api_key = "your_api_key_here"  # Uncomment to add API key authentication
 
 # Upload retry policy
