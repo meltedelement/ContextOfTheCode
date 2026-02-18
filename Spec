@@ -1,0 +1,579 @@
+# CONTEXT OF THE CODE — Comprehensive Project Specification
+
+**Immersive Software Engineering [ISE]**
+**System-Monitoring Dashboard: Cloud-Based, Multi-Device Metric Collection & Visualisation**
+
+Professor John Savage · University of Limerick · www.software-engineering.ie
+Compiled from Lectures 1–6
+
+---
+
+## 1. Project Overview
+
+This project is the core assessment for the Context of the Code module within the Immersive Software Engineering (ISE) programme. Teams of three students design and build a system-monitoring tool that collects metrics from multiple devices and data sources, transmits them to a cloud-based server, stores them in a database, and presents them via a live dashboard with historical data views.
+
+The project is coordinated with Sarmad's Mobile Application Development module. Both modules share the same teams.
+
+---
+
+## 2. Functional Requirements
+
+A System-Monitoring Tool that provides cloud dashboards for PC, mobile device, and third-party data and history.
+
+### 2.1 Metric Collection
+
+- Minimum 2 metrics per device (e.g., running threads, open processes, RAM usage, temperature)
+- Choose values that change reasonably regularly but not at sub-second frequency
+- Bad examples: number of CPUs (too static), CPU usage percentage (too volatile)
+- Good examples: RAM usage, process count, disk temperature, thread count
+
+### 2.2 Data Sources (3 Required)
+
+1. **PC** – Local operating system metrics read via libraries such as psutil
+2. **Mobile Device** – Metrics gathered from a mobile application (coordinated with Sarmad's module)
+3. **Third-Party Service** – External data source such as a cloud weather API, IoT device, stock price feed, or similar
+
+### 2.3 Data Transmission
+
+- All sources must report their metrics to a cloud-based server
+- Transmission should use a RESTful API with JSON payloads
+- Data model must be serialisable and transmittable across processes and networks
+
+### 2.4 Cloud Storage
+
+- Store a history of all received metrics on the cloud server
+- Use a normalised database schema (SQLite or equivalent)
+- Support querying of both live (latest) and historic data
+
+### 2.5 Dashboard UI
+
+- Present a dashboard showing live and historic data
+- Dashboard must be accessible via a web browser
+- Should visualise data from all three sources (PC, mobile, third-party)
+
+### 2.6 Stretch Goal
+
+Send messages back to a device (e.g., restart an application, trigger a re-read, change collection interval).
+
+---
+
+## 3. Non-Functional Requirements
+
+- Understand the "why" behind every interface and component built
+- Flexible data flow: new services, devices, and metrics can be added over time without massive rework
+- End magical thinking – understand every line of code in detail
+- Gain deeper understanding of operating systems, networks, cloud APIs, databases, and other layers depended upon
+- Have fun!
+
+---
+
+## 4. Target Architecture
+
+The system follows a multi-tier architecture with clearly separated concerns.
+
+### 4.1 Collector Agents (Client-Side)
+
+Long-lived, unattended console applications that run on each data source. Each agent:
+
+- Reads local metrics at a scheduled interval (e.g., every 30 seconds)
+- Serialises metrics into a DTO (Data Transfer Object)
+- Uploads the data to the cloud API via HTTP POST
+- Reports activity via a logger
+
+### 4.2 Cloud Web Server (Server-Side)
+
+A Flask-based (or equivalent) web server deployed to a cloud environment that:
+
+- Exposes RESTful API endpoints for metric upload and retrieval
+- Deserialises incoming DTOs and stores data via ORM to the database
+- Serves the dashboard UI
+- Implements caching for performance on slow reads
+
+### 4.3 Database Layer
+
+- SQLite database with a normalised schema
+- ORM layer (SQLAlchemy) for object–relational mapping
+- Tables for: aggregators/platforms, devices, snapshots, metrics, and lookup/config tables
+
+### 4.4 Dashboard (Presentation)
+
+- Web-based UI showing live metrics and historical trends
+- Visualisation types: gauges, tables, charts
+- Accessible from any browser (no same-network restriction)
+
+### 4.5 Cloud Hosting Options
+
+| Option    | Details                                                                 |
+|-----------|-------------------------------------------------------------------------|
+| Preferred | software-engineering.ie Linux VMs – contact student admins for access   |
+| Simple    | pythonanywhere.com – free account, supports Flask + SQLite              |
+| Other     | Any cloud provider (Azure, AWS, Heroku, etc.)                           |
+
+---
+
+## 5. Data Model Specification
+
+### 5.1 Core Entities
+
+The data model is highly normalised with four layers from aggregator down to individual metric values.
+
+**Aggregator / Platform**
+- Represents the top-level identity of a reporting system
+- Fields: platform_uuid (GUID), name
+- One aggregator may manage multiple devices
+
+**Device**
+- A specific data source within an aggregator (e.g., a PC, phone, weather API)
+- Fields: device_id, name, device_type, aggregator reference
+
+**Snapshot**
+- A point-in-time reading from a device
+- Fields: snapshot_id, device reference, timestamp (UTC + timezone offset)
+
+**Metric**
+- An individual named value within a snapshot
+- Fields: metric_id, snapshot reference, metric_name, metric_value
+
+### 5.2 Data Model Design Considerations
+
+- Every metric reading is tied to a device and a point in time
+- Multiple devices per aggregator, multiple metrics per snapshot
+- Data must be transmittable (serialisable to JSON)
+- Use proper types for UUID and timestamps (not strings)
+- Record time in UTC with timezone offset (ISO 8601 format)
+- Use pseudo-keys / GUIDs for external identification – never expose database PKs
+
+### 5.3 DTO vs Domain vs ORM Models
+
+Multiple representations of the data model exist at different layers:
+
+- **Database model:** fully normalised with surrogate keys, ORM metadata
+- **Server domain model:** business logic, validation constraints
+- **DTO model:** core data only, used for API transmission (JSON)
+- **Client domain model:** client-visible subset of data
+
+A master definition of the data structure, relationships, and rules is critical. Mapping between layers should be explicit, whether manual, via library (Pydantic), or via serialisation/deserialisation.
+
+---
+
+## 6. API Design
+
+### 6.1 RESTful Principles
+
+- Stateless – no server-side session state; enables horizontal scaling
+- Resource-centric design with unique URIs
+- Standard HTTP verbs: GET, POST, PUT, PATCH, DELETE
+- Standard HTTP status codes for responses (200, 201, 204, 400, 404, etc.)
+- JSON data format for request and response bodies
+
+### 6.2 Suggested Endpoint Structure
+
+**Option 1 – Bulk Upload**
+- POST /upload_snapshot – single monolithic DataSnapshot object
+- Low chattiness, but inflexible and complex client object
+
+**Option 2 – Balanced (Recommended)**
+- POST /devices – register a device, receive a device_id
+- POST /metrics – submit a time-stamped metrics array for a device_id
+
+**Option 3 – Granular**
+- POST /devices – register device
+- POST /snapshots – create snapshot for a device_id
+- POST /metrics – submit individual metrics into a snapshot_id
+
+**Option 4 – Flexible**
+- Support both bulk and granular endpoints for different client needs
+
+### 6.3 HTTP Verb Usage
+
+| Verb   | Purpose          | Idempotent | Typical Response           |
+|--------|------------------|------------|----------------------------|
+| GET    | Retrieve data    | Yes        | 200 OK with resource data  |
+| POST   | Create resource  | No         | 201 Created with ID        |
+| PUT    | Replace resource | Yes        | 200 OK or 204 No Content   |
+| PATCH  | Partial update   | Yes        | 200 OK or 204 No Content   |
+| DELETE | Remove resource  | Yes        | 204 No Content             |
+
+### 6.4 Additional API Considerations
+
+- Versioning: URL-based (e.g., /v1/metrics), header-based, or query parameter
+- Security: API keys, OAuth, JWT, rate limiting, input sanitisation
+- Testing: use Postman, cURL, Swagger, or a dedicated test driver application
+- Serialisation: handle UUID and datetime types explicitly; custom encoders/decoders may be needed
+- Consistency: decide whether single-item GETs return a bare object or a wrapped array and be consistent
+
+---
+
+## 7. Development Phases & Methods
+
+The project is structured across the lecture weeks as follows. Each phase builds on the previous and introduces new engineering concepts.
+
+| Phase  | Focus                                    | Key Topics & Methods                                                                                                                                                          |
+|--------|------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Week 1 | PoC 1.0 – Read & Manage Device Data      | Hello World, config management, logging, data reading (psutil), data model design, serialisation (JSON)                                                                       |
+| Week 2 | Data Transmission Fundamentals           | TCP server/client, application protocols, stream vs message, IPC types, resource management, RAII pattern, performance timing                                                  |
+| Week 3 | Web-Enabling Metrics                     | RAII BlockTimer, Flask web server, code libraries/packages, data-reading web server, caching (basic and improved), execution order, entry-point management                      |
+| Week 4 | Cloud System Build Out                   | Command-line parameters (argparse), network infrastructure, cloud deployment (pythonanywhere / VMs), WSGI, virtual environments, RESTful CRUD API, SQL orientation, normalisation |
+| Week 5 | Database & ORM Primer                    | SQL fundamentals (SELECT/INSERT/JOIN), indexing, query plans, transactions (ACID), ORM (SQLAlchemy + sqlacodegen), relationships, change tracking, lazy vs eager loading        |
+| Week 6 | Data Mapping, APIs & Integration         | ORM deep-dive, data models at each layer, DTO mapping, API design (bulk vs granular), versioning, security, timestamps/timezones, device identity, collector agent, end-to-end  |
+| Week 7+| SDKs, Visualisation & UI                 | SDK design, data visualisation types, real-time vs pre-processed, client/server-side processing, dashboard implementation, final integration                                    |
+
+---
+
+## 8. Coding Exercises & Methods
+
+Below is a comprehensive list of every coding exercise, code-along, code break, and demo prescribed across all six lecture days. These form the incremental building blocks of the project.
+
+### 8.1 Lecture Day 1
+
+**10) Hello World**
+- Print Hello World to console
+- Consider all subsystems already in play (IDE, Python interpreter, stdout, terminal, file system, environment variables, OS, BIOS, firmware)
+
+**20) Configuration Management**
+- Implement config subsystem using config.json
+- Change Hello World to print a configured string value
+- Create reusable library subfolder for config code
+- Understand file path resolution (CWD, PATH, case sensitivity on Linux vs Windows)
+
+**30) Logging**
+- Replace print() with logger.info() using Python's logging framework
+- Configure console and file log targets
+- Bonus: colour console output
+- Bonus: use config for logger setup
+
+**40) Data Reading**
+- Read minimum 2 values from the operating system (e.g., via psutil)
+- Log values using the logger
+- Exit application cleanly with exit code 0 on success, non-zero on error
+
+**50) Data Model**
+- Implement data model classes (DataSnapshot)
+- Read values into data model objects
+- Log serialised values as JSON
+- Bonus: deserialise JSON and log attributes from the deserialised object
+
+### 8.2 Lecture Day 2
+
+**10) TCP Server & Client**
+- Server: listen on port ~54545, accept connections, continuously read and log data
+- Client: connect to server, log local/remote socket IP and port, send 50x 60-character strings
+- Observe stream behaviour, TIME_WAIT states, port usage via netstat
+
+**20) Simple Application Protocol**
+- Client: assemble fixed 4-character header (payload length, zero-padded) + payload
+- Server: change receive buffer to 50 bytes, add buffering and parsing logic
+- Print only complete payloads parsed from the stream
+
+**30) Bad Socket Client (Resource Management Demo)**
+- Multi-threaded server with client that errors before closing sockets
+- Observe resource leaks via netstat
+- Fix with proper socket.close() in exception handlers
+
+**40) Performance Timing**
+- New console app with loop timed using time.time() and time.perf_counter()
+- Time loops of 100, 10,000, and 1,000,000 iterations
+- Compare accuracy of both timing methods
+
+**50) RAII Timing**
+- Create BlockTimer class implementing __enter__ and __exit__
+- Time: 100,000 simple loops, 100,000 function calls, 100,000 OS API calls
+- Observe cost of abstraction layers
+
+### 8.3 Lecture Day 3
+
+**10) RAII Timing (Revisited)**
+- Refactor and review BlockTimer implementation
+- Observe: method calls are ~3.25x slower than inline; OS calls are ~625x slower
+
+**20) Basic Web Server**
+- New Flask project with config and logging initialisation
+- Register a /hello route returning "Hello World!"
+- Understand WSGI, in-process vs full web server, event-driven vs procedural
+
+**30) DataReading Web Server**
+- Create code library packages for BlockTimer, DataSnapshot, Config/Logging
+- Add /metrics endpoint that reads data, returns RESTful JSON response
+- Include two timestamps: start-read and respond
+- Understand JSON formatting (flask expects dict, not pre-serialised string)
+
+**40) Basic Caching Web Server**
+- Add thread.sleep() to slow /metrics > 5 seconds
+- Implement cache with ~30-second invalidation
+- Thread-synchronise cache access
+- Verify start-read timestamp changes periodically; respond timestamp changes each time
+
+**50) Improved Caching Web Server (Demo)**
+- Implement logic table for cache states (6 real states from 4 boolean inputs)
+- RAII lock/unlock for CacheUpdateManager
+- Spin-wait model with time.sleep(0.1) for CPU/responsiveness balance
+- Consider background thread updates for fairness
+
+**60) Execution Order**
+- Understand Python script execution: top-to-bottom, depth-first by file, once per file
+- Usage of `__name__ == "__main__"` for entry-point management
+
+### 8.4 Lecture Day 4
+
+**10) Command Line Parameters**
+- Create main.py using argparse and `__name__` idiom
+- `python main.py –s` (server), `–c` (client), `–a` (auto-detect)
+- Stretch: `–serverip` and `–port` overrides for configured values
+
+**20) Basic Cloud Web Server**
+- Deploy Hello World web endpoint to pythonanywhere.com or software-engineering.ie VM
+- Set up virtual environment and requirements.txt
+- Configure WSGI entry point
+- Use `__main__` idiom to allow same script to run locally and on cloud
+
+**30) Data Managing Web Server**
+- Manage in-memory database of Person objects {name, dob}
+- Implement full CRUD on /people endpoint: POST, GET, GET/<id>, PUT/<id>, DELETE/<id>
+- Test with Postman, cURL, or a driver test_client app
+
+**40) Basic SQL Queries (Demo)**
+- SELECT, COUNT, INSERT, foreign key violations
+- MAX, ORDER BY, WHERE, GROUP BY
+- RecordSet concept (2D array of rows and columns)
+
+**50) Basic SQL Client**
+- Connect to test SQLite DB, log all people and COUNT(*)
+- Add new users with random names (import names library)
+- Add friendships between consecutive new people
+- Observe: cursor management, parameterised queries (SQL injection prevention), RAII
+
+**60) More SQL Queries (Demo)**
+- JOINs: INNER, LEFT, RIGHT, FULL OUTER
+- Aliases and sub-queries
+
+**70) Recordset Parsing**
+- Create Person class with my_friends[] and calls_me_friend[] properties
+- Execute JOIN query, iterate cursor, create Person objects without duplicates
+- Use Dict of Persons to track already-instantiated objects
+- Stretch: identify all people with no friends
+
+### 8.5 Lecture Day 5
+
+**50) Performance SQL Queries (Demo)**
+- With ~3.5 million people, compare query on indexed vs unindexed columns
+- Compare query plans: Search (O(log n)) vs Scan (O(n))
+- CREATE INDEX to fix performance
+
+**60) Transaction SQL Client**
+- Implement RAII TransactionManager
+- Add all users in one transaction
+- Query DB before and after COMMIT
+- Observe journal file, deadlock warnings, consistent table access order
+
+**70) ORM Client**
+- Generate models with sqlacodegen from SQLite database
+- Declare PersonEx inheriting from ORM Person, add calculated Age property
+- Select and print all people, add new people and friendships
+- Observe: session.add(), session.flush() for IDs, implicit transactions
+
+**80) ORM Relationships**
+- Configure my_friends and calls_me_friend relationships on PersonEx
+- Four relationship definitions needed (primary + secondary on each side)
+- Enable SQLAlchemy logging to observe actual SQL under the hood
+- Understand viewOnly=True and back_populates for safe bidirectional navigation
+
+**90) ORM Change Tracking (Demo)**
+- Query single item, show dirty state during modification
+- Demonstrate flush/commit/expunge/rollback
+- Prove same object returned for same PK ID (identity map)
+
+**95) SQL vs ORM Comparison (Demo)**
+- Compare raw SQL recordset parsing vs ORM lazy load vs ORM eager load
+- Worst case: lazy + no work = ORM ~328x slower
+- Best case: eager + work per item = ORM ~1.27x slower
+
+### 8.6 Lecture Day 6
+
+**10–30) ORM Revisited**
+- ORM relationships, change tracking, and performance demos (continuation from Day 5)
+
+**40) DataSnapshot Web API**
+- Finalise API and data model for DataSnapshot (ID, timestamps, normalisation)
+- Create DataSnapshot tables in SQLite, generate ORM models
+- Create single /upload_snapshot POST handler
+- Deserialise and store DataSnapshot to DB via ORM
+- Test with Postman or a client driver app
+
+**50) Evolved Web API**
+- Implement DTO objects for use on both client and server
+- Add at least one granular API POST and GET endpoint
+- Test with Postman/cURL
+- Observe: chained .filter().filter().all() pattern in SQLAlchemy
+
+**60) Bringing It All Together**
+- Combine latest Evolved Web API project with Day 1 console app
+- Add timing loop (every 30 seconds) to read and upload metrics
+- Deploy Web API and DB to cloud server
+- End-to-end test: steady addition of metrics to the database
+- Extend for third-party service metrics (HTTP/Bluetooth/USB API integration)
+
+---
+
+## 9. Engineering Concepts Checklist
+
+The following concepts are covered across the lectures and may be examined in MCQs and the project interview. Students should understand each in the context of their project.
+
+### Foundations
+- Configuration management (config.json, no magic strings/values)
+- Logging frameworks (Python logging, log levels, console + file targets)
+- Performance-conscious string concatenation
+- Exit codes (0 = success, non-zero = error)
+- Environment variables and PATH resolution
+
+### Data & Serialisation
+- Data model design (normalisation, relationships, constraints)
+- Serialisation/deserialisation (JSON, reflection, transformation)
+- Memory models (stack vs heap, shared memory)
+- DTO vs domain model vs ORM model separation
+- UUID and datetime handling (ISO 8601, UTC + timezone offset)
+
+### Networking & IPC
+- IPC types: shared memory, pipes, files, queues, databases, TCP, UDP
+- TCP mechanics: sockets, streams, buffers, MTU, sliding window, TIME_WAIT
+- Application protocol design (headers, payloads, stream-to-message conversion)
+- Network infrastructure: DNS, firewalls, routers, switches, NAT, port forwarding
+- Diagnostic tools: ping, nslookup, tracert, telnet, netstat, ipconfig, nmap
+
+### Resource Management
+- OS handles/file descriptors as finite resources
+- RAII pattern (__enter__ / __exit__ in Python, with statement)
+- Socket lifecycle and proper cleanup (even on exceptions)
+- BlockTimer as a reusable RAII timing tool
+
+### Web & Cloud
+- Web server concepts (event-driven, multi-threaded, entry points)
+- Flask basics (routes, handlers, WSGI)
+- RESTful API design (verbs, status codes, resource-centric URIs)
+- Cloud deployment (virtual environments, requirements.txt, WSGI config)
+- Caching (in-memory, invalidation, thread synchronisation, spin-wait)
+
+### Databases & ORM
+- SQL fundamentals (SELECT, INSERT, UPDATE, DELETE, WHERE, ORDER BY, JOIN)
+- Normalisation and referential integrity
+- Keys: primary, foreign, compound, surrogate, pseudo
+- Indexing (B-tree, clustered vs non-clustered, query plans)
+- Transactions (ACID, BEGIN/COMMIT/ROLLBACK, deadlocks)
+- ORM (SQLAlchemy): object generation, relationships, lazy vs eager loading
+- Change tracking: identity map, dirty state, flush/commit/rollback/expunge
+- N+1 query problem and mitigation strategies
+
+### Software Design
+- Code libraries and Python packages (__init__.py)
+- Execution order (top-to-bottom, depth-first, `__name__ == '__main__'`)
+- Command-line parameters (argparse)
+- Collector agent design (scheduling, error recovery, drift management)
+- API design tradeoffs (bulk vs granular, versioning, security)
+- Performance profiling with BlockTimer and SQLAlchemy logging
+
+---
+
+## 10. Stretch Goals & Bonus Challenges
+
+These additional goals have been mentioned across the lectures. Delivering a stretch goal is part of the indicative rubric.
+
+### 10.1 Primary Stretch Goal
+
+**Send messages/commands back to a device** – e.g., restart an application, trigger a metric re-read, change collection interval, or execute an arbitrary command on the client device.
+
+### 10.2 Exercise-Level Stretch Goals
+
+1. Colour console log output (Day 1, Logging exercise)
+2. Use config.json for logger setup (Day 1, Logging exercise)
+3. Deserialise JSON and log attributes from the deserialised object (Day 1, Data Model exercise)
+4. Command-line overrides for server IP and port (Day 4, argparse exercise)
+5. Identify all people with no friends via SQL (Day 4/5, Recordset Parsing exercise)
+6. Get a friend's aggregator to write to your API (Day 6 homework)
+7. Have thousands of metrics stored before the next class (Day 6 homework)
+
+### 10.3 Implied Advanced Challenges
+
+Based on lecture discussions and observations, these represent areas of engineering excellence:
+
+- Background thread cache updates for fair request handling
+- Eager loading with proper SQLAlchemy configuration for relationship performance
+- Offline storage and retry queues for collector agent resilience
+- Server-side pagination with filters and sort orders for large datasets
+- SDK/package design wrapping your API for easy client consumption
+- Real-time dashboard updates (WebSocket or polling)
+- Multi-aggregator support (multiple users/systems writing to same API)
+
+---
+
+## 11. Assessment
+
+### 11.1 Project – 70%
+
+- Team-based (3 people per team)
+- Python preferred, but any language accepted
+- Interview with hard time limit (~20 minutes)
+- Minimal documentation: ~3 slides (template provided), no report
+- Code to be submitted
+- All team members must contribute
+
+**Indicative Rubric:**
+
+| Criterion                       | Focus                                                          |
+|---------------------------------|----------------------------------------------------------------|
+| Communication & Presentation    | Clarity of explanation, quality of slides                      |
+| Meets Project Brief             | All functional requirements delivered and working              |
+| Stretch Goal Delivered          | At least one stretch goal implemented                          |
+| Understanding of Code Built     | Can explain every line; can troubleshoot and modify in session |
+| Engineering & Innovation        | Code quality, design decisions, creative solutions             |
+
+**Interview Expectations:**
+- Demonstrate a working end-to-end system
+- Troubleshoot and/or modify code in the session
+- Explain the thinking behind approach and any change requests
+- Show knowledge of the full context of your code (no magical thinking)
+
+### 11.2 MCQ Quizzes – 30%
+
+- 7 weekly quizzes (10 questions, 10–15 minutes each)
+- Best 5 of 7 count (5 × 6% = 30%)
+- No negative marking – attempt all questions
+- Based on prior week's "Lots Covered" slide and surrounding material
+- Mapped marking, letter-grade aligned
+
+---
+
+## 12. Key Best Practices Summary
+
+### 12.1 Configuration
+- Never embed strings or configuration values in code (except the config filename)
+- Use human-readable formats (config.json)
+- Minimal config file: store connection info to DB/API; all else in DB/API
+- Use environment variables for secrets
+
+### 12.2 Logging
+- Centrally configure logging
+- Only create static logger objects
+- Don't comment, log – better looking at it than looking for it
+- Log flow and flow-critical data, never PII or secrets
+- Ensure machine-parseable file output (CSV, tab-delimited, fixed width)
+
+### 12.3 Resource Management
+- Always close resources (files, sockets, DB connections), even on exceptions
+- Use RAII pattern (with statement in Python) for guaranteed cleanup
+- Client should close sockets (not server) for scalability
+
+### 12.4 Data & Serialisation
+- Know your intended outcome and data types
+- Serialise at the last responsible moment
+- Use proper typed objects throughout; convert to JSON only at API boundary
+- Always record timestamps in UTC with timezone offset
+
+### 12.5 Performance
+- Use BlockTimer to profile critical code paths
+- Enable SQLAlchemy logging to monitor actual SQL queries
+- Prefer eager loading for complex objects; lazy loading for simple ones
+- Operate close to data (SQL calculations > ORM iteration > client processing)
+- Avoid SELECT *; use LIMIT, EXISTS, and targeted column queries
+
+---
+
+*End of Specification*
