@@ -1,55 +1,26 @@
-"""
-Base Data Collector Module
-
-This module provides an abstract base class for data collectors that inherit
-from it to target specific data sources (mobile, local, third_party, etc.).
-"""
+"""Base class for data collectors."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import uuid
 import time
-import tomllib
-from pathlib import Path
+import threading
 from pydantic import BaseModel, Field
 from sharedUtils.logger.logger import get_logger
+from sharedUtils.upload_queue.manager import get_upload_queue
+from sharedUtils.config import get_config
 
 logger = get_logger(__name__)
 
-
-def load_config(config_path: str = None) -> Dict[str, Any]:
-    """
-    Load configuration from TOML file.
-
-    Args:
-        config_path: Path to the configuration file (defaults to sharedUtils/config/config.toml)
-
-    Returns:
-        Configuration dictionary
-
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-    """
-    if config_path is None:
-        # Default to sharedUtils/config/config.toml relative to project root
-        project_root = Path(__file__).parent.parent
-        config_path = project_root / "sharedUtils" / "config" / "config.toml"
-    else:
-        config_path = Path(config_path)
-
-    logger.debug("Loading config from: %s", config_path)
-
-    if not config_path.exists():
-        logger.error("Config file not found: %s", config_path)
-        raise FileNotFoundError("Configuration file not found: %s" % config_path)
-
-    with open(config_path, "rb") as f:
-        logger.debug("Configuration loaded successfully")
-        return tomllib.load(f)
+# Config is now loaded lazily via get_config()
+# Kept for backwards compatibility
+CONFIG = get_config()
 
 
-# Load configuration at module level
-CONFIG = load_config()
+class MetricEntry(BaseModel):
+    """Single metric entry with name and value."""
+    metric_name: str
+    metric_value: float
 
 
 class MetricEntry(BaseModel):
@@ -70,20 +41,7 @@ class MetricEntry(BaseModel):
 
 
 class DataMessage(BaseModel):
-    """
-    Pydantic model for data collector messages.
-
-    This model ensures type validation and provides automatic serialization
-    for messages sent to the upload queue. All metric values are enforced
-    as floats via MetricEntry to avoid mixed-type complexity.
-
-    Attributes:
-        message_id: Unique identifier for the message (auto-generated UUID)
-        timestamp: Unix timestamp when the message was created (auto-generated)
-        device_id: Identifier for the data source device
-        source: Data source type (e.g., 'mobile', 'local', 'third_party')
-        metrics: List of MetricEntry objects with float-only values
-    """
+    """Data message from collectors."""
     message_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: float = Field(default_factory=time.time)
     device_id: str
@@ -93,30 +51,44 @@ class DataMessage(BaseModel):
 
 class BaseDataCollector(ABC):
     """
-    Abstract base class for data collectors.
+    Abstract base class for data collectors with threading support.
 
     This class should not be instantiated directly. Instead, create subclasses
     that implement the collect_data() method for specific data sources.
 
+    Collectors can run in two modes:
+    1. Manual: Call generate_message() directly when needed
+    2. Async: Call start() to run in background thread with automatic collection
+
     Attributes:
         source (str): The data source identifier (e.g., 'mobile', 'local', 'third_party')
         device_id (str): identifier for the data source
+        collection_interval (int): How often to collect data in seconds (for async mode)
     """
 
-    def __init__(self, source: str, device_id: str):        
+    def __init__(self, source: str, device_id: str, collection_interval: int):
         """
         Initialize the base data collector.
 
         Args:
             source: String identifier for the data source type
-            device_id:  device identifier
+            device_id: Device identifier
+            collection_interval: Collection interval in seconds for async mode
         """
         logger.debug("Initialised BaseDataCollector")
 
         self.source = source
         self.device_id = device_id
+        self.collection_interval = collection_interval
 
-        logger.debug("Collector init with source = %s, device_id = %s", source, device_id)
+        # Threading state
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+
+        logger.debug(
+            "Collector init with source=%s, device_id=%s, interval=%d",
+            source, device_id, collection_interval
+        )
 
     @abstractmethod
     def collect_data(self) -> List[MetricEntry]:
@@ -135,65 +107,121 @@ class BaseDataCollector(ABC):
         logger.debug("BaseDataCollector.collect_data() called — should be overridden.")
         pass
 
-    @abstractmethod
     def export_to_data_model(self, message: DataMessage) -> None:
-        """
-        Export the generated message to the data model format.
+        """Export message to upload queue."""
+        queue = get_upload_queue()
+        success = queue.put(message)
 
-        This method must be implemented by subclasses to define how they
-        serialize and export their data. The message is a validated Pydantic
-        model ready for the upload queue.
-
-        Args:
-            message: DataMessage Pydantic model with metadata and collected data
-
-        Raises:
-            NotImplementedError: If not implemented by subclass
-        """
-        pass
+        if success:
+            logger.info("Queued message %s with %d metrics", message.message_id, len(message.metrics))
+        else:
+            logger.error("Failed to queue message %s", message.message_id)
 
     def generate_message(self) -> DataMessage:
-        """
-        Generate a complete message with collected data.
+        """Generate message with collected data and send to queue."""
+        data = self.collect_data()
 
-        This method calls collect_data() and wraps the result in the
-        standard message format with metadata. It automatically exports
-        the message to the data model via export_to_data_model().
+        # Convert dict to metrics list
+        metrics = [
+            MetricEntry(metric_name=key, metric_value=float(value))
+            for key, value in data.items()
+            if isinstance(value, (int, float))
+        ]
 
-        Returns:
-            DataMessage Pydantic model with validated data following the schema
-        """
-        metrics = self.collect_data()
-        logger.debug("Collected %d metrics", len(metrics))
-
-        # Create validated Pydantic message — MetricEntry enforces float values
         message = DataMessage(
             device_id=self.device_id,
             source=self.source,
             metrics=metrics
         )
-        logger.debug("Generated message: %s", message.message_id)
 
-        # Automatically export to data model
         self.export_to_data_model(message)
-        logger.debug("Message exported to data model")
-
         return message
-
-    def validate_metrics(self, metrics: List[MetricEntry]) -> bool:
-        """
-        Validate collected metrics.
-
-        Can be overridden by subclasses for custom validation logic.
-
-        Args:
-            metrics: The list of MetricEntry objects to validate
-
-        Returns:
-            True if metrics are valid, False otherwise
-        """
-        return isinstance(metrics, list) and len(metrics) > 0
 
     def __repr__(self) -> str:
         """String representation of the collector."""
         return f"{self.__class__.__name__}(source='{self.source}', device_id={self.device_id})"
+
+    def _collection_loop(self) -> None:
+        """
+        Background thread loop for automatic data collection.
+
+        Continuously collects data at the configured interval until stop() is called.
+        """
+        logger.info(
+            "%s: Starting collection loop (interval=%ds)",
+            self.__class__.__name__,
+            self.collection_interval
+        )
+
+        while self._running:
+            try:
+                # Collect and queue data
+                message = self.generate_message()
+                logger.debug(
+                    "%s: Collected %d metrics (message_id=%s)",
+                    self.__class__.__name__,
+                    len(message.metrics),
+                    message.message_id[:8] + "..."
+                )
+
+            except Exception as e:
+                logger.error(
+                    "%s: Error during collection: %s",
+                    self.__class__.__name__,
+                    e,
+                    exc_info=True
+                )
+
+            # Sleep with interrupt checking (check every second)
+            for _ in range(self.collection_interval):
+                if not self._running:
+                    break
+                time.sleep(1)
+
+        logger.info("%s: Collection loop stopped", self.__class__.__name__)
+
+    def start(self) -> None:
+        """
+        Start the collector in async mode (background thread).
+
+        Spawns a background thread that continuously collects data
+        at the configured interval.
+        """
+        if self._running:
+            logger.warning("%s: Already running", self.__class__.__name__)
+            return
+
+        logger.info("%s: Starting async collection", self.__class__.__name__)
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._collection_loop,
+            name=f"{self.__class__.__name__}-Thread",
+            daemon=False
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        """
+        Stop the collector and wait for background thread to finish.
+
+        Signals the collection loop to stop and waits for clean shutdown.
+        """
+        if not self._running:
+            logger.debug("%s: Not running", self.__class__.__name__)
+            return
+
+        logger.info("%s: Stopping async collection...", self.__class__.__name__)
+        self._running = False
+
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=self.collection_interval + 5)
+            if self._thread.is_alive():
+                logger.warning("%s: Thread did not stop cleanly", self.__class__.__name__)
+            else:
+                logger.info("%s: Stopped successfully", self.__class__.__name__)
+
+        self._thread = None
+
+    def is_running(self) -> bool:
+        """Check if collector is currently running in async mode."""
+        return self._running

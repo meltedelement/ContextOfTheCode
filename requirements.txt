@@ -3,8 +3,10 @@
 # Core dependencies
 pydantic>=2.0.0          # Data validation and serialization
 psutil>=5.9.0            # System metrics collection
+requests>=2.31.0         # HTTP client for API calls
+redis>=5.0.0             # For persistent upload queue
 
-# Future dependencies (uncomment when needed)
-# flask>=3.0.0           # For aggregator API
-# sqlalchemy>=2.0.0      # For database operations
-# redis>=5.0.0           # For upload queue (optional)
+# Server dependencies
+flask>=3.0.0             # API server
+sqlalchemy>=2.0.0        # ORM for database operations
+pymysql>=1.1.0           # MySQL driver for PythonAnywhere

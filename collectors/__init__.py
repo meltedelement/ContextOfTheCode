@@ -1,10 +1,5 @@
-"""
-Data Collectors Package
+"""Data collectors for various sources."""
 
-This package contains the base data collector class and various collector
-implementations for different data sources (local, mobile, third_party, etc.).
-"""
+from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry
 
-from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry, CONFIG
-
-__all__ = ["BaseDataCollector", "DataMessage", "MetricEntry", "CONFIG"]
+__all__ = ["BaseDataCollector", "DataMessage", "MetricEntry"]

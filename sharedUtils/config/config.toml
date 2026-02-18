@@ -1,8 +1,8 @@
 # Data Collector and Upload Queue Configuration
 
 [logging]
-# Change logging level to: DEBUG, INFO, WARNING, ERROR, CRITICAL
-level = "DEBUG"
+# Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+level = "INFO"
 file = "logger/logs/system_metrics.log"
 format = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 
@@ -17,8 +17,9 @@ json_indent = 2
 schema_path = "data_model.json"
 
 [collectors]
-# Default collection interval in seconds
+# Default collection interval in seconds (fallback if not specified per-collector)
 default_interval = 60
+default_collection_interval = 60
 
 # Enable/disable specific collector types
 enabled_collectors = ["local", "mobile", "third_party"]
@@ -29,7 +30,14 @@ cpu_sample_interval = 1.0
 # Decimal precision for rounding metrics
 metric_precision = 1
 
-[wikipedia]
+[local_collector]
+# How often to collect local system metrics (seconds)
+collection_interval = 10
+
+[wikipedia_collector]
+# How often to collect Wikipedia metrics (seconds)
+collection_interval = 60
+
 # Time window in seconds for collecting edit counts
 collection_window = 60
 
@@ -37,13 +45,24 @@ collection_window = 60
 user_agent = "WikipediaDataCollector/1.0 (Educational Project)"
 
 [upload_queue]
-# Maximum queue size (number of messages)
-max_queue_size = 1000
+# Redis-based persistent upload queue
+implementation = "redis"
 
-# Queue timeout in seconds
-queue_timeout = 30
+# Redis connection settings (for RedisUploadQueue)
+redis_host = "localhost"
+redis_port = 6379
+redis_db = 0
+# redis_password = "your_password_here"  # Uncomment if Redis requires authentication
 
-# Batch size for uploads
-batch_size = 10
+# Database API endpoint (where messages are uploaded)
+api_endpoint = "http://localhost:5000/api/metrics"
+# api_key = "your_api_key_here"  # Uncomment to add API key authentication
 
+# Upload retry policy
+max_retry_attempts = 5
+backoff_base = 1              # Base delay in seconds (1s, 2s, 4s, 8s, 16s with multiplier=2)
+backoff_multiplier = 2        # Exponential backoff multiplier
+timeout = 10                  # HTTP request timeout in seconds
 
+# Worker settings
+worker_sleep = 1              # Sleep time in seconds when queue is empty
