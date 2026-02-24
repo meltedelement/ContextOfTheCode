@@ -44,6 +44,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+REDIS_CONNECT_TIMEOUT = 5    # Seconds to wait when opening a new Redis connection
+WORKER_STOP_TIMEOUT = 5      # Seconds to wait for the worker thread to shut down cleanly
+RETRY_BATCH_SIZE = 10        # Max retry-queue entries promoted to pending per loop iteration
+BRPOP_TIMEOUT = 1            # Seconds brpop blocks waiting for a new pending message
+
 
 class RedisUploadQueue(UploadQueue):
     """
@@ -125,7 +130,7 @@ class RedisUploadQueue(UploadQueue):
             db=self.redis_db,
             password=self.redis_password,
             decode_responses=True,  # Automatically decode bytes to strings
-            socket_connect_timeout=5,
+            socket_connect_timeout=REDIS_CONNECT_TIMEOUT,
             socket_keepalive=True
         )
 
@@ -162,7 +167,7 @@ class RedisUploadQueue(UploadQueue):
 
         # Wait for worker thread to finish (with timeout)
         if self.worker_thread and self.worker_thread.is_alive():
-            self.worker_thread.join(timeout=5)
+            self.worker_thread.join(timeout=WORKER_STOP_TIMEOUT)
             if self.worker_thread.is_alive():
                 logger.warning("Worker thread did not stop gracefully")
 
@@ -259,13 +264,13 @@ class RedisUploadQueue(UploadQueue):
         try:
             current_time = time.time()
 
-            # Get up to 10 messages whose retry time has passed
+            # Get up to RETRY_BATCH_SIZE messages whose retry time has passed
             ready_messages = self.redis_client.zrangebyscore(
                 self.RETRY_QUEUE,
                 min=0,
                 max=current_time,
                 start=0,
-                num=10
+                num=RETRY_BATCH_SIZE
             )
 
             for envelope_json in ready_messages:
@@ -302,7 +307,7 @@ class RedisUploadQueue(UploadQueue):
         """
         try:
             # Pop one message from the right (FIFO: LPUSH + BRPOP)
-            result = self.redis_client.brpop(self.PENDING_QUEUE, timeout=1)
+            result = self.redis_client.brpop(self.PENDING_QUEUE, timeout=BRPOP_TIMEOUT)
 
             if not result:
                 return False  # Queue is empty

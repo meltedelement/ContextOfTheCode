@@ -6,6 +6,7 @@ from pathlib import Path
 
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.toml"
 DEFAULT_LOG_FILE = Path("logs/app.log")
+DEFAULT_LOG_FORMAT = "%(asctime)s — %(name)s — %(levelname)s — %(message)s"
 
 # Cached config and locks
 _config_lock = threading.Lock()
@@ -27,14 +28,14 @@ def load_logging_config():
                     _cached_config = {
                         "level": log_cfg.get("level", "INFO").upper(),
                         "file": Path(log_cfg.get("file", DEFAULT_LOG_FILE)),
-                        "format": log_cfg.get("format", "%(asctime)s — %(name)s — %(levelname)s — %(message)s"),
+                        "format": log_cfg.get("format", DEFAULT_LOG_FORMAT),
                     }
                 except Exception:
                     # Fall back to defaults if config missing/broken
                     _cached_config = {
                         "level": "INFO",
                         "file": DEFAULT_LOG_FILE,
-                        "format": "%(asctime)s — %(name)s — %(levelname)s — %(message)s",
+                        "format": DEFAULT_LOG_FORMAT,
                     }
 
     return _cached_config

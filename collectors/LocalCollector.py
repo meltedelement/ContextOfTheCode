@@ -1,7 +1,7 @@
 """Local system metrics collector (CPU, RAM, temperature)."""
 
-from collectors.base_data_collector import BaseDataCollector, DataMessage
-from typing import Dict, Any, Optional
+from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry
+from typing import List, Optional
 import psutil
 from sharedUtils.logger.logger import get_logger
 from sharedUtils.config import get_collector_config, get_local_collector_config
@@ -44,7 +44,7 @@ class LocalDataCollector(BaseDataCollector):
                     return round(first_sensor[0].current, precision)
         return None
 
-    def collect_data(self) -> Dict[str, Any]:
+    def collect_data(self) -> List[MetricEntry]:
         """Collect system metrics (CPU, RAM, temperature)."""
         config = get_collector_config()
         precision = config.metric_precision
@@ -54,16 +54,16 @@ class LocalDataCollector(BaseDataCollector):
         cpu_percent = psutil.cpu_percent(interval=cpu_interval)
         cpu_temp = self._get_cpu_temperature()
 
-        data = {
-            "ram_usage_percent": round(memory.percent, precision),
-            "ram_used_mb": round(memory.used / BYTES_TO_MB, precision),
-            "cpu_usage_percent": round(cpu_percent, precision),
-        }
+        metrics = [
+            MetricEntry(metric_name="ram_usage_percent", metric_value=round(memory.percent, precision),          unit="%"),
+            MetricEntry(metric_name="ram_used_mb",        metric_value=round(memory.used / BYTES_TO_MB, precision), unit="MB"),
+            MetricEntry(metric_name="cpu_usage_percent",  metric_value=round(cpu_percent, precision),            unit="%"),
+        ]
 
         if cpu_temp is not None:
-            data["cpu_temp_celsius"] = cpu_temp
+            metrics.append(MetricEntry(metric_name="cpu_temp_celsius", metric_value=cpu_temp, unit="°C"))
 
-        return data
+        return metrics
 
 
 if __name__ == "__main__":
@@ -73,4 +73,4 @@ if __name__ == "__main__":
     print(f"Local Collector - {collector.device_id}")
     print(f"Metrics collected: {len(message.metrics)}")
     for metric in message.metrics:
-        print(f"  {metric.metric_name}: {metric.metric_value}")
+        print(f"  {metric.metric_name}: {metric.metric_value} {metric.unit}")

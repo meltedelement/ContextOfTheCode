@@ -1,7 +1,7 @@
 """Base class for data collectors."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from typing import List, Optional
 import uuid
 import time
 import threading
@@ -16,11 +16,7 @@ logger = get_logger(__name__)
 # Kept for backwards compatibility
 CONFIG = get_config()
 
-
-class MetricEntry(BaseModel):
-    """Single metric entry with name and value."""
-    metric_name: str
-    metric_value: float
+THREAD_SHUTDOWN_GRACE_SECONDS = 5  # Extra seconds beyond collection_interval to wait for thread stop
 
 
 class MetricEntry(BaseModel):
@@ -35,9 +31,11 @@ class MetricEntry(BaseModel):
     Attributes:
         metric_name: Identifier for the metric (e.g., 'ram_usage_percent')
         metric_value: The measured value, always a float
+        unit: Short string describing the measurement unit (e.g. '%', 'MB', '°C')
     """
     metric_name: str
     metric_value: float
+    unit: str = ""
 
 
 class DataMessage(BaseModel):
@@ -119,19 +117,12 @@ class BaseDataCollector(ABC):
 
     def generate_message(self) -> DataMessage:
         """Generate message with collected data and send to queue."""
-        data = self.collect_data()
-
-        # Convert dict to metrics list
-        metrics = [
-            MetricEntry(metric_name=key, metric_value=float(value))
-            for key, value in data.items()
-            if isinstance(value, (int, float))
-        ]
+        metrics = self.collect_data()
 
         message = DataMessage(
             device_id=self.device_id,
             source=self.source,
-            metrics=metrics
+            metrics=metrics,
         )
 
         self.export_to_data_model(message)
@@ -214,7 +205,7 @@ class BaseDataCollector(ABC):
         self._running = False
 
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=self.collection_interval + 5)
+            self._thread.join(timeout=self.collection_interval + THREAD_SHUTDOWN_GRACE_SECONDS)
             if self._thread.is_alive():
                 logger.warning("%s: Thread did not stop cleanly", self.__class__.__name__)
             else:

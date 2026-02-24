@@ -8,16 +8,14 @@ from flask import Flask, request, jsonify
 from pydantic import ValidationError
 from sqlalchemy import asc
 
-# Add parent directory to path so collectors and sharedUtils are importable
-# both in local dev and on PythonAnywhere
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from collectors.base_data_collector import DataMessage
 from server.database import Base, engine, get_db
 from server.models import Message, Metric
 from sharedUtils.logger.logger import get_logger
 
 logger = get_logger(__name__)
+
+DEFAULT_QUERY_LIMIT = 100  # Max messages returned by GET /api/metrics when no limit param is given
 
 app = Flask(__name__)
 
@@ -38,7 +36,7 @@ def post_metrics():
         "device_id": "device_identifier",
         "source": "local|mobile|wikipedia",
         "metrics": [
-            {"metric_name": "cpu_usage_percent", "metric_value": 45.2},
+            {"metric_name": "cpu_usage_percent", "metric_value": 45.2, "unit": "%"},
             ...
         ]
     }
@@ -72,6 +70,7 @@ def post_metrics():
                     message_id=message.message_id,
                     metric_name=entry.metric_name,
                     metric_value=entry.metric_value,
+                    unit=entry.unit,
                 ))
 
         logger.info(
@@ -107,7 +106,7 @@ def get_metrics():
     try:
         device_id = request.args.get('device_id')
         source    = request.args.get('source')
-        limit     = request.args.get('limit', 100, type=int)
+        limit     = request.args.get('limit', DEFAULT_QUERY_LIMIT, type=int)
         since     = request.args.get('since', type=float)
     except (ValueError, TypeError) as e:
         return jsonify({"error": f"Invalid query parameter: {e}"}), 400
@@ -134,7 +133,7 @@ def get_metrics():
                     "collected_at": m.collected_at,
                     "received_at":  m.received_at,
                     "metrics": [
-                        {"metric_name": metric.metric_name, "metric_value": metric.metric_value}
+                        {"metric_name": metric.metric_name, "metric_value": metric.metric_value, "unit": metric.unit}
                         for metric in m.metrics
                     ],
                 }

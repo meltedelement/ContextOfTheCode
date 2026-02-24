@@ -1,7 +1,7 @@
 """Wikipedia edit collector using MediaWiki Recent Changes API."""
 
-from collectors.base_data_collector import BaseDataCollector, DataMessage
-from typing import Dict, Any, Optional
+from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry
+from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import requests
 import sys
@@ -15,6 +15,7 @@ SOURCE_TYPE = "wikipedia"  # Source identifier for Wikipedia collector
 DEFAULT_LANGUAGE = "en"  # Default to English Wikipedia
 API_TIMEOUT = 10  # HTTP request timeout in seconds
 NAMESPACE_ARTICLES = 0  # Namespace 0 = article pages (not talk pages, etc.)
+TIMESTAMP_FORMAT = "%H:%M:%S"  # Display format for log timestamps in __main__ output
 
 
 class WikipediaCollector(BaseDataCollector):
@@ -81,7 +82,7 @@ class WikipediaCollector(BaseDataCollector):
             logger.warning("Failed to parse Wikipedia API response: %s", e)
             return None
 
-    def collect_data(self) -> Dict[str, Any]:
+    def collect_data(self) -> List[MetricEntry]:
         """Collect Wikipedia edit count for the configured time window."""
         collection_window = get_wikipedia_collector_config().collection_window
         end_time = datetime.now(timezone.utc)
@@ -89,9 +90,13 @@ class WikipediaCollector(BaseDataCollector):
 
         edit_count = self._query_recent_changes(start_time, end_time)
 
-        return {
-            "edit_count_last_minute": edit_count if edit_count is not None else 0,
-        }
+        return [
+            MetricEntry(
+                metric_name="edit_count_last_minute",
+                metric_value=float(edit_count if edit_count is not None else 0),
+                unit="edits/min",
+            )
+        ]
 
 
 if __name__ == "__main__":
@@ -115,9 +120,9 @@ if __name__ == "__main__":
             )
 
             if edit_count is not None:
-                print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Edits: {int(edit_count)}")
+                print(f"[{datetime.now(timezone.utc).strftime(TIMESTAMP_FORMAT)}] Edits: {int(edit_count)} edits/min")
             else:
-                print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] No data")
+                print(f"[{datetime.now(timezone.utc).strftime(TIMESTAMP_FORMAT)}] No data")
             time.sleep(poll_interval)
     except KeyboardInterrupt:
         print("\nStopped")
