@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from collectors.base_data_collector import DataMessage
 from server.database import Base, engine, get_db
 from server.models import Message, Metric
-from sharedUtils.logger.logger import get_logger
+from ContextOfTheCode.sharedUtils.logger.logger import get_logger
 
 logger = get_logger(__name__)
 

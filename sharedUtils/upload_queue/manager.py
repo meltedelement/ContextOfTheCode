@@ -2,10 +2,10 @@
 
 from typing import Optional
 import threading
-from sharedUtils.upload_queue.base_queue import UploadQueue
-from sharedUtils.upload_queue.redis_queue import RedisUploadQueue
-from sharedUtils.config import get_upload_queue_config
-from sharedUtils.logger.logger import get_logger
+from ContextOfTheCode.sharedUtils.upload_queue.base_queue import UploadQueue
+from ContextOfTheCode.sharedUtils.upload_queue.redis_queue import RedisUploadQueue
+from ContextOfTheCode.sharedUtils.config import get_upload_queue_config
+from ContextOfTheCode.sharedUtils.logger.logger import get_logger
 
 logger = get_logger(__name__)
 
