@@ -3,8 +3,8 @@
 from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry
 from typing import List, Optional
 import psutil
-from sharedUtils.logger.logger import get_logger
-from sharedUtils.config import get_collector_config, get_local_collector_config
+from ContextOfTheCode.sharedUtils.logger.logger import get_logger
+from ContextOfTheCode.sharedUtils.config import get_collector_config, get_local_collector_config
 
 
 # Constants
