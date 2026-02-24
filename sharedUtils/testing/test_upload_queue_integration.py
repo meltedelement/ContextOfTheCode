@@ -33,9 +33,8 @@ def test_collectors_to_queue():
 
     print("Generating message from LocalCollector...")
     local_message = local_collector.generate_message()
-    print(f"  Message ID: {local_message.message_id}")
+    print(f"  Snapshot ID: {local_message.snapshot_id}")
     print(f"  Device ID: {local_message.device_id}")
-    print(f"  Source: {local_message.source}")
     print(f"  Metrics: {len(local_message.metrics)}")
 
     # Test 2: WikipediaCollector
@@ -48,9 +47,8 @@ def test_collectors_to_queue():
 
     print("Generating message from WikipediaCollector...")
     wiki_message = wiki_collector.generate_message()
-    print(f"  Message ID: {wiki_message.message_id}")
+    print(f"  Snapshot ID: {wiki_message.snapshot_id}")
     print(f"  Device ID: {wiki_message.device_id}")
-    print(f"  Source: {wiki_message.source}")
     print(f"  Metrics: {len(wiki_message.metrics)}")
 
     # Test 3: Queue Statistics

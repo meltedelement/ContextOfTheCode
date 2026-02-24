@@ -44,6 +44,10 @@ collection_window = 60
 # User-Agent string for Wikipedia API requests
 user_agent = "WikipediaDataCollector/1.0 (Educational Project)"
 
+[aggregator]
+# Human-readable name for this aggregator (machine running run_all.py)
+name = "SavageLaptop"
+
 [upload_queue]
 # Redis-based persistent upload queue
 implementation = "redis"
@@ -56,6 +60,9 @@ redis_db = 0
 
 # Database API endpoint (where messages are uploaded)
 api_endpoint = "http://localhost:5001/api/metrics"
+
+# Base URL for device/aggregator registration endpoints
+registration_base_url = "http://localhost:5001"
 # api_key = "your_api_key_here"  # Uncomment to add API key authentication
 
 # Upload retry policy
