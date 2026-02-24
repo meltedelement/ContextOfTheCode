@@ -3,9 +3,10 @@
 System Monitoring Tool - Main Orchestrator
 
 Starts and manages all components:
-- Flask API server (receives and stores metrics)
 - Upload queue worker (auto-started by queue manager)
 - Data collectors (LocalCollector, WikipediaCollector)
+
+The Flask API server runs separately on the remote server.
 
 Usage:
     python run_all.py
@@ -14,10 +15,6 @@ Usage:
 import sys
 import time
 import signal
-import subprocess
-import socket
-from typing import Optional
-from pathlib import Path
 
 try:
     import redis as redis_lib
@@ -37,16 +34,11 @@ from sharedUtils.config import get_typed_config
 
 logger = get_logger(__name__)
 
-FLASK_PORT = 5000                    # Port the Flask API server listens on
 FLASK_HEALTH_POLL_INTERVAL = 0.5    # Seconds between /health polls
 FLASK_HEALTH_TIMEOUT = 30           # Max seconds to wait for Flask to become healthy
-FLASK_STOP_TIMEOUT_SECONDS = 5      # Grace period for Flask to shut down before SIGKILL
-PORT_CHECK_TIMEOUT_SECONDS = 1      # Socket timeout when probing whether a port is in use
 REDIS_CHECK_TIMEOUT_SECONDS = 2     # Socket connect timeout when verifying Redis is reachable
 SHUTDOWN_POLL_INTERVAL_SECONDS = 1  # How often the main loop checks for a stop signal
 
-# Global state for graceful shutdown
-flask_process: Optional[subprocess.Popen] = None
 running = True
 
 
@@ -80,50 +72,6 @@ def check_redis_running() -> bool:
         logger.error("  OR")
         logger.error("  redis-server")
         return False
-
-
-def check_port_available(port: int, host: str = 'localhost') -> bool:
-    """Check if a port is available."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.settimeout(PORT_CHECK_TIMEOUT_SECONDS)
-        result = sock.connect_ex((host, port))
-        return result != 0  # Port is available if connection fails
-    finally:
-        sock.close()
-
-
-def start_flask_server() -> Optional[subprocess.Popen]:
-    """Start the Flask API server in a subprocess."""
-    logger.info("Starting Flask API server...")
-
-    # Check if port 5000 is already in use
-    if not check_port_available(FLASK_PORT):
-        logger.warning("⚠ Port %d is already in use - Flask may already be running", FLASK_PORT)
-        logger.warning("Continuing without starting new Flask instance...")
-        return None
-
-    try:
-        flask_script = Path(__file__).parent / "server" / "app.py"
-        process = subprocess.Popen(
-            [sys.executable, str(flask_script)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1  # Line buffered
-        )
-
-        if process.poll() is not None:
-            stderr = process.stderr.read() if process.stderr else ""
-            logger.error("✗ Flask server failed to start immediately: %s", stderr)
-            return None
-
-        logger.info("Flask process started (PID: %d), waiting for /health...", process.pid)
-        return process
-
-    except Exception as e:
-        logger.error("✗ Failed to start Flask server: %s", e)
-        return None
 
 
 def wait_for_flask_healthy(base_url: str) -> bool:
@@ -181,8 +129,8 @@ def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict
     enabled = config.collectors.enabled_collectors
 
     source_map = [
-        ("local",      "local-system",    "local"),
-        ("third_party", "wikipedia-api",  "wikipedia"),
+        ("local",       "local-system",  "local"),
+        ("third_party", "wikipedia-api", "wikipedia"),
     ]
 
     for collector_key, device_name, source in source_map:
@@ -296,41 +244,24 @@ def signal_handler(signum, frame):
 
 def cleanup():
     """Clean up resources on shutdown."""
-    global flask_process
-
     logger.info("Cleaning up resources...")
 
-    # Stop upload queue worker
     try:
         stop_upload_queue()
         logger.info("✓ Upload queue stopped")
     except Exception as e:
         logger.error("Error stopping upload queue: %s", e)
 
-    # Stop Flask server
-    if flask_process and flask_process.poll() is None:
-        logger.info("Stopping Flask server...")
-        flask_process.terminate()
-        try:
-            flask_process.wait(timeout=FLASK_STOP_TIMEOUT_SECONDS)
-            logger.info("✓ Flask server stopped")
-        except subprocess.TimeoutExpired:
-            logger.warning("Flask server did not stop gracefully, forcing shutdown...")
-            flask_process.kill()
-
     logger.info("Shutdown complete")
 
 
 def main():
     """Main entry point."""
-    global flask_process
-
     logger.info("=" * 60)
     logger.info("System Monitoring Tool - Starting All Components")
     logger.info("=" * 60)
     logger.info("")
 
-    # Set up signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -342,11 +273,7 @@ def main():
 
         logger.info("")
 
-        # Step 2: Start Flask API server
-        flask_process = start_flask_server()
-        logger.info("")
-
-        # Step 3: Poll /health until Flask is ready
+        # Step 2: Check remote Flask server is reachable
         config = get_typed_config()
         registration_base_url = config.upload_queue.registration_base_url
         if not wait_for_flask_healthy(registration_base_url):
@@ -355,14 +282,14 @@ def main():
 
         logger.info("")
 
-        # Step 4: Register aggregator and devices
+        # Step 3: Register aggregator and devices
         aggregator_name = config.aggregator.name
         logger.info("Registering aggregator '%s'...", aggregator_name)
         device_ids = register_aggregator_and_devices(registration_base_url, aggregator_name)
         logger.info("Device IDs: %s", device_ids)
         logger.info("")
 
-        # Step 5: Start collectors with server-issued UUIDs
+        # Step 4: Start collectors with server-issued UUIDs
         collectors = start_collectors(device_ids)
 
         if not collectors:
@@ -372,7 +299,6 @@ def main():
         logger.info("✓ All components initialized successfully")
         logger.info("")
 
-        # Wait for shutdown signal
         wait_for_shutdown(collectors)
 
     except KeyboardInterrupt:
