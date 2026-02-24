@@ -28,9 +28,9 @@ except ImportError:
 
 from collectors.LocalCollector import LocalDataCollector
 from collectors.WikipediaCollector import WikipediaCollector
-from sharedUtils.logger.logger import get_logger
-from sharedUtils.upload_queue.manager import stop_upload_queue
-from sharedUtils.config import get_typed_config
+from ContextOfTheCode.sharedUtils.logger.logger import get_logger
+from ContextOfTheCode.sharedUtils.upload_queue.manager import stop_upload_queue
+from ContextOfTheCode.sharedUtils.config import get_typed_config
 
 logger = get_logger(__name__)
 

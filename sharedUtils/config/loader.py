@@ -4,8 +4,8 @@ from typing import Dict, Any, Optional
 import threading
 import tomllib
 from pathlib import Path
-from sharedUtils.logger.logger import get_logger
-from sharedUtils.config.models import (
+from ContextOfTheCode.sharedUtils.logger.logger import get_logger
+from ContextOfTheCode.sharedUtils.config.models import (
     AppConfig,
     CollectorsConfig,
     LocalCollectorConfig,
