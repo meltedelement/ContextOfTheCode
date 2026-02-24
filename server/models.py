@@ -40,6 +40,7 @@ class Metric(Base):
     message_id   = Column(String(36),  ForeignKey("messages.message_id"), nullable=False)
     metric_name  = Column(String(255), nullable=False)
     metric_value = Column(Float,       nullable=False)
+    unit         = Column(String(50),  nullable=False, server_default="")
 
     message = relationship("Message", back_populates="metrics")
 

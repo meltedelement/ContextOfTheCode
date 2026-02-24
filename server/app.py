@@ -38,7 +38,7 @@ def post_metrics():
         "device_id": "device_identifier",
         "source": "local|mobile|wikipedia",
         "metrics": [
-            {"metric_name": "cpu_usage_percent", "metric_value": 45.2},
+            {"metric_name": "cpu_usage_percent", "metric_value": 45.2, "unit": "%"},
             ...
         ]
     }
@@ -72,6 +72,7 @@ def post_metrics():
                     message_id=message.message_id,
                     metric_name=entry.metric_name,
                     metric_value=entry.metric_value,
+                    unit=entry.unit,
                 ))
 
         logger.info(
@@ -134,7 +135,7 @@ def get_metrics():
                     "collected_at": m.collected_at,
                     "received_at":  m.received_at,
                     "metrics": [
-                        {"metric_name": metric.metric_name, "metric_value": metric.metric_value}
+                        {"metric_name": metric.metric_name, "metric_value": metric.metric_value, "unit": metric.unit}
                         for metric in m.metrics
                     ],
                 }
