@@ -15,6 +15,7 @@ SOURCE_TYPE = "wikipedia"  # Source identifier for Wikipedia collector
 DEFAULT_LANGUAGE = "en"  # Default to English Wikipedia
 API_TIMEOUT = 10  # HTTP request timeout in seconds
 NAMESPACE_ARTICLES = 0  # Namespace 0 = article pages (not talk pages, etc.)
+TIMESTAMP_FORMAT = "%H:%M:%S"  # Display format for log timestamps in __main__ output
 
 
 class WikipediaCollector(BaseDataCollector):
@@ -119,9 +120,9 @@ if __name__ == "__main__":
             )
 
             if edit_count is not None:
-                print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Edits: {int(edit_count)} edits/min")
+                print(f"[{datetime.now(timezone.utc).strftime(TIMESTAMP_FORMAT)}] Edits: {int(edit_count)} edits/min")
             else:
-                print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] No data")
+                print(f"[{datetime.now(timezone.utc).strftime(TIMESTAMP_FORMAT)}] No data")
             time.sleep(poll_interval)
     except KeyboardInterrupt:
         print("\nStopped")

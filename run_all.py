@@ -19,6 +19,11 @@ import socket
 from typing import Optional
 from pathlib import Path
 
+try:
+    import redis as redis_lib
+except ImportError:
+    redis_lib = None
+
 from collectors.LocalCollector import LocalDataCollector
 from collectors.WikipediaCollector import WikipediaCollector
 from sharedUtils.logger.logger import get_logger
@@ -26,6 +31,13 @@ from sharedUtils.upload_queue.manager import stop_upload_queue
 from sharedUtils.config import get_typed_config
 
 logger = get_logger(__name__)
+
+FLASK_PORT = 5000                   # Port the Flask API server listens on
+FLASK_START_DELAY_SECONDS = 2       # Time to wait after launching Flask before checking if it's alive
+FLASK_STOP_TIMEOUT_SECONDS = 5      # Grace period for Flask to shut down before SIGKILL
+PORT_CHECK_TIMEOUT_SECONDS = 1      # Socket timeout when probing whether a port is in use
+REDIS_CHECK_TIMEOUT_SECONDS = 2     # Socket connect timeout when verifying Redis is reachable
+SHUTDOWN_POLL_INTERVAL_SECONDS = 1  # How often the main loop checks for a stop signal
 
 # Global state for graceful shutdown
 flask_process: Optional[subprocess.Popen] = None
@@ -39,14 +51,17 @@ def check_redis_running() -> bool:
 
     logger.info("Checking Redis connection at %s:%d...", redis_config.redis_host, redis_config.redis_port)
 
+    if redis_lib is None:
+        logger.error("✗ redis package is not installed — cannot check Redis")
+        return False
+
     try:
-        import redis
-        client = redis.Redis(
+        client = redis_lib.Redis(
             host=redis_config.redis_host,
             port=redis_config.redis_port,
             db=redis_config.redis_db,
             password=redis_config.redis_password,
-            socket_connect_timeout=2
+            socket_connect_timeout=REDIS_CHECK_TIMEOUT_SECONDS
         )
         client.ping()
         logger.info("✓ Redis is running")
@@ -65,7 +80,7 @@ def check_port_available(port: int, host: str = 'localhost') -> bool:
     """Check if a port is available."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        sock.settimeout(1)
+        sock.settimeout(PORT_CHECK_TIMEOUT_SECONDS)
         result = sock.connect_ex((host, port))
         return result != 0  # Port is available if connection fails
     finally:
@@ -77,8 +92,8 @@ def start_flask_server() -> Optional[subprocess.Popen]:
     logger.info("Starting Flask API server...")
 
     # Check if port 5000 is already in use
-    if not check_port_available(5000):
-        logger.warning("⚠ Port 5000 is already in use - Flask may already be running")
+    if not check_port_available(FLASK_PORT):
+        logger.warning("⚠ Port %d is already in use - Flask may already be running", FLASK_PORT)
         logger.warning("Continuing without starting new Flask instance...")
         return None
 
@@ -93,12 +108,12 @@ def start_flask_server() -> Optional[subprocess.Popen]:
         )
 
         # Give Flask a moment to start
-        time.sleep(2)
+        time.sleep(FLASK_START_DELAY_SECONDS)
 
         # Check if process is still running
         if process.poll() is None:
             logger.info("✓ Flask API server started (PID: %d)", process.pid)
-            logger.info("  Endpoint: http://localhost:5000/api/metrics")
+            logger.info("  Endpoint: http://localhost:%d/api/metrics", FLASK_PORT)
             return process
         else:
             stderr = process.stderr.read() if process.stderr else ""
@@ -173,7 +188,7 @@ def wait_for_shutdown(collectors):
     try:
         # Just sleep while collectors run in background
         while running:
-            time.sleep(1)
+            time.sleep(SHUTDOWN_POLL_INTERVAL_SECONDS)
     except KeyboardInterrupt:
         logger.info("")
         logger.info("Interrupted by user")
@@ -212,7 +227,7 @@ def cleanup():
         logger.info("Stopping Flask server...")
         flask_process.terminate()
         try:
-            flask_process.wait(timeout=5)
+            flask_process.wait(timeout=FLASK_STOP_TIMEOUT_SECONDS)
             logger.info("✓ Flask server stopped")
         except subprocess.TimeoutExpired:
             logger.warning("Flask server did not stop gracefully, forcing shutdown...")

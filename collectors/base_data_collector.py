@@ -16,6 +16,8 @@ logger = get_logger(__name__)
 # Kept for backwards compatibility
 CONFIG = get_config()
 
+THREAD_SHUTDOWN_GRACE_SECONDS = 5  # Extra seconds beyond collection_interval to wait for thread stop
+
 
 class MetricEntry(BaseModel):
     """
@@ -203,7 +205,7 @@ class BaseDataCollector(ABC):
         self._running = False
 
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=self.collection_interval + 5)
+            self._thread.join(timeout=self.collection_interval + THREAD_SHUTDOWN_GRACE_SECONDS)
             if self._thread.is_alive():
                 logger.warning("%s: Thread did not stop cleanly", self.__class__.__name__)
             else:
