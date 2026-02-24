@@ -50,7 +50,7 @@ class TransportCollector(BaseDataCollector):
 			logger.warning("Failed to parse TripUpdates API response: %s", e)
 			return None
 	"""
-	
+
 	TransportCollector pulls data from a REST API endpoint.
 
 	Supports authentication using primary (primary key is the API key) and secondary keys, which are sent as headers.
@@ -108,7 +108,7 @@ class TransportCollector(BaseDataCollector):
 		except Exception as e:
 			logger.warning("Failed to parse Transport API response: %s", e)
 			return None
-		
+
 	def _query_tripupdate_api(self) -> Optional[dict]:
 		headers = {}
 		if self.primary_key:
@@ -116,7 +116,7 @@ class TransportCollector(BaseDataCollector):
 		if self.secondary_key:
 			headers["X-Secondary-Key"] = self.secondary_key
 		params = {"format": "json"}
-		try: 
+		try:
 			response = requests.get(self.api_url, headers=headers, params=params, timeout=API_TIMEOUT)
 			response.raise_for_status()
 			data = response.json()  # Parse JSON response
@@ -128,7 +128,7 @@ class TransportCollector(BaseDataCollector):
 		except Exception as e:
 			logger.warning("Failed to parse Trip Update API response: %s", e)
 			return None
-		
+
 	def collect_data(self) -> DataMessage:
 		"""
 		Collect transport data from the configured API endpoint and return a DataMessage.
@@ -227,7 +227,6 @@ class TransportCollector(BaseDataCollector):
 			source=SOURCE_TYPE,
 			metrics=[]
 		)
-
 
 
 
