@@ -3,19 +3,19 @@
 import os
 import sys
 import time
+import uuid
 
 from flask import Flask, request, jsonify
-from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import asc
 
-from collectors.base_data_collector import DataMessage
 from server.database import Base, engine, get_db
-from server.models import Message, Metric
+from server.models import Aggregator, Device, Snapshot, Metric
 from sharedUtils.logger.logger import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_QUERY_LIMIT = 100  # Max messages returned by GET /api/metrics when no limit param is given
+DEFAULT_QUERY_LIMIT = 100  # Max snapshots returned by GET /api/metrics when no limit param is given
 
 app = Flask(__name__)
 
@@ -24,17 +24,99 @@ Base.metadata.create_all(bind=engine)
 logger.info("Database tables verified/created")
 
 
+@app.route('/aggregators', methods=['POST'])
+def post_aggregators():
+    """
+    Register an aggregator by name (idempotent).
+
+    Body: {"name": "SavageLaptop"}
+    Returns existing aggregator_id with 200 if name already registered,
+    or new aggregator_id with 201 on first registration.
+    """
+    data = request.get_json()
+    if not data or "name" not in data:
+        return jsonify({"error": "Missing 'name' field"}), 400
+
+    name = data["name"]
+
+    try:
+        with get_db() as db:
+            aggregator = db.query(Aggregator).filter_by(name=name).first()
+            if aggregator:
+                logger.info("Aggregator '%s' already registered: %s", name, aggregator.aggregator_id)
+                return jsonify({"aggregator_id": aggregator.aggregator_id}), 200
+
+            new_id = str(uuid.uuid4())
+            db.add(Aggregator(aggregator_id=new_id, name=name))
+
+        logger.info("Registered new aggregator '%s': %s", name, new_id)
+        return jsonify({"aggregator_id": new_id}), 201
+
+    except IntegrityError:
+        # Race condition: another request registered the same name concurrently
+        with get_db() as db:
+            aggregator = db.query(Aggregator).filter_by(name=name).first()
+            if aggregator:
+                return jsonify({"aggregator_id": aggregator.aggregator_id}), 200
+        return jsonify({"error": "Failed to register aggregator"}), 500
+
+    except Exception as e:
+        logger.error("POST /aggregators: database error: %s", str(e))
+        return jsonify({"error": "Failed to register aggregator"}), 500
+
+
+@app.route('/devices', methods=['POST'])
+def post_devices():
+    """
+    Register a device under an aggregator.
+
+    Body: {"aggregator_id": "uuid", "name": "local-system", "source": "local"}
+    Returns {"device_id": "server-generated-uuid"} with 201.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No JSON data provided"}), 400
+
+    aggregator_id = data.get("aggregator_id")
+    name          = data.get("name")
+    source        = data.get("source")
+
+    if not all([aggregator_id, name, source]):
+        return jsonify({"error": "Missing required fields: aggregator_id, name, source"}), 400
+
+    try:
+        with get_db() as db:
+            aggregator = db.query(Aggregator).filter_by(aggregator_id=aggregator_id).first()
+            if not aggregator:
+                return jsonify({"error": f"Aggregator '{aggregator_id}' not found"}), 404
+
+            device_id = str(uuid.uuid4())
+            db.add(Device(
+                device_id=device_id,
+                aggregator_id=aggregator_id,
+                name=name,
+                source=source,
+            ))
+
+        logger.info("Registered device '%s' (source=%s) under aggregator %s: %s",
+                    name, source, aggregator_id, device_id)
+        return jsonify({"device_id": device_id}), 201
+
+    except Exception as e:
+        logger.error("POST /devices: database error: %s", str(e))
+        return jsonify({"error": "Failed to register device"}), 500
+
+
 @app.route('/api/metrics', methods=['POST'])
 def post_metrics():
     """
-    Receive metrics data from a collector and persist to the database.
+    Receive a snapshot of metrics from a collector and persist to the database.
 
-    Expects a JSON body matching the DataMessage schema:
+    Expects a JSON body matching the SnapshotMessage schema:
     {
-        "message_id": "uuid",
+        "snapshot_id": "uuid",
         "timestamp": 1234567890.123,
-        "device_id": "device_identifier",
-        "source": "local|mobile|wikipedia",
+        "device_id": "server-issued-uuid",
         "metrics": [
             {"metric_name": "cpu_usage_percent", "metric_value": 45.2, "unit": "%"},
             ...
@@ -47,41 +129,47 @@ def post_metrics():
         logger.warning("POST /api/metrics: no JSON body")
         return jsonify({"error": "No JSON data provided"}), 400
 
-    try:
-        message = DataMessage(**data)
-    except ValidationError as e:
-        logger.warning("POST /api/metrics: validation failed: %s", str(e))
-        return jsonify({"error": str(e)}), 400
+    snapshot_id = data.get("snapshot_id")
+    device_id   = data.get("device_id")
+    timestamp   = data.get("timestamp")
+    metrics     = data.get("metrics", [])
+
+    if not all([snapshot_id, device_id, timestamp is not None]):
+        return jsonify({"error": "Missing required fields: snapshot_id, device_id, timestamp"}), 400
 
     try:
         with get_db() as db:
-            row = Message(
-                message_id=message.message_id,
-                device_id=message.device_id,
-                source=message.source,
-                collected_at=message.timestamp,
+            device = db.query(Device).filter_by(device_id=device_id).first()
+            if not device:
+                logger.warning("POST /api/metrics: unknown device_id=%s", device_id)
+                return jsonify({"error": f"Device '{device_id}' not found"}), 404
+
+            snapshot = Snapshot(
+                snapshot_id=snapshot_id,
+                device_id=device_id,
+                collected_at=timestamp,
                 received_at=time.time(),
             )
-            db.add(row)
-            db.flush()  # Get the primary key before adding children
+            db.add(snapshot)
+            db.flush()
 
-            for entry in message.metrics:
+            for entry in metrics:
                 db.add(Metric(
-                    message_id=message.message_id,
-                    metric_name=entry.metric_name,
-                    metric_value=entry.metric_value,
-                    unit=entry.unit,
+                    snapshot_id=snapshot_id,
+                    metric_name=entry.get("metric_name", ""),
+                    metric_value=float(entry.get("metric_value", 0.0)),
+                    unit=entry.get("unit", ""),
                 ))
 
         logger.info(
-            "Stored message %s from device=%s source=%s (%d metrics)",
-            message.message_id, message.device_id, message.source, len(message.metrics)
+            "Stored snapshot %s from device=%s (%d metrics)",
+            snapshot_id, device_id, len(metrics)
         )
 
         return jsonify({
             "status": "success",
-            "message_id": message.message_id,
-            "metrics_received": len(message.metrics),
+            "snapshot_id": snapshot_id,
+            "metrics_received": len(metrics),
         }), 201
 
     except Exception as e:
@@ -95,9 +183,9 @@ def get_metrics():
     Retrieve historical metrics data.
 
     Query parameters:
-        device_id (optional): Filter by device ID
-        source    (optional): Filter by source (local, mobile, wikipedia)
-        limit     (optional): Max messages to return, default 100
+        device_id (optional): Filter by device UUID
+        source    (optional): Filter by source (local, wikipedia) — joined through Device
+        limit     (optional): Max snapshots to return, default 100
         since     (optional): Unix timestamp — only return data collected after this time
 
     Results are ordered by collected_at ascending so the dashboard always
@@ -113,42 +201,46 @@ def get_metrics():
 
     try:
         with get_db() as db:
-            query = db.query(Message)
+            query = db.query(Snapshot)
 
             if device_id:
-                query = query.filter(Message.device_id == device_id)
+                query = query.filter(Snapshot.device_id == device_id)
             if source:
-                query = query.filter(Message.source == source)
+                query = query.join(Device).filter(Device.source == source)
             if since is not None:
-                query = query.filter(Message.collected_at > since)
+                query = query.filter(Snapshot.collected_at > since)
 
-            query = query.order_by(asc(Message.collected_at)).limit(limit)
-            messages = query.all()
+            query = query.order_by(asc(Snapshot.collected_at)).limit(limit)
+            snapshots = query.all()
 
             result = [
                 {
-                    "message_id":   m.message_id,
-                    "device_id":    m.device_id,
-                    "source":       m.source,
-                    "collected_at": m.collected_at,
-                    "received_at":  m.received_at,
+                    "snapshot_id":  s.snapshot_id,
+                    "device_id":    s.device_id,
+                    "source":       s.device.source,
+                    "collected_at": s.collected_at,
+                    "received_at":  s.received_at,
                     "metrics": [
-                        {"metric_name": metric.metric_name, "metric_value": metric.metric_value, "unit": metric.unit}
-                        for metric in m.metrics
+                        {
+                            "metric_name":  m.metric_name,
+                            "metric_value": m.metric_value,
+                            "unit":         m.unit,
+                        }
+                        for m in s.metrics
                     ],
                 }
-                for m in messages
+                for s in snapshots
             ]
 
         logger.info(
-            "GET /api/metrics: returned %d messages (device=%s, source=%s, since=%s)",
+            "GET /api/metrics: returned %d snapshots (device=%s, source=%s, since=%s)",
             len(result), device_id, source, since
         )
 
         return jsonify({
-            "status": "success",
-            "count":   len(result),
-            "messages": result,
+            "status":    "success",
+            "count":     len(result),
+            "snapshots": result,
         }), 200
 
     except Exception as e:

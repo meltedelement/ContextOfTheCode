@@ -89,6 +89,7 @@ class UploadQueueConfig(BaseModel):
     backoff_multiplier: int = Field(default=2, description="Exponential backoff multiplier")
     timeout: int = Field(default=10, description="HTTP request timeout")
     worker_sleep: int = Field(default=1, description="Worker sleep time when queue is empty")
+    registration_base_url: str = Field(default="http://100.67.157.90:5000", description="Base URL for /aggregators and /devices registration")
 
     @field_validator("redis_port")
     @classmethod
@@ -105,6 +106,11 @@ class UploadQueueConfig(BaseModel):
         return v
 
 
+class AggregatorConfig(BaseModel):
+    """Configuration for aggregator identity."""
+    name: str = Field(description="Human-readable name for this aggregator")
+
+
 class AppConfig(BaseModel):
     """Root configuration model containing all sections."""
     logging: LoggingConfig
@@ -113,3 +119,4 @@ class AppConfig(BaseModel):
     local_collector: LocalCollectorConfig
     wikipedia_collector: WikipediaCollectorConfig
     upload_queue: UploadQueueConfig
+    aggregator: AggregatorConfig
