@@ -124,7 +124,7 @@ class BaseDataCollector(ABC):
         # Convert dict to metrics list
         metrics = [
             MetricEntry(metric_name=key, metric_value=float(value))
-            for key, value in data.items()
+            for key, value in data.model_dump().items()
             if isinstance(value, (int, float))
         ]
 
