@@ -9,7 +9,7 @@ framework's message and queue system. The collector is designed to be easily ext
 different API response formats and authentication schemes.
 """
 
-from ContextOfTheCode.collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry
+from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry
 from typing import Dict, Any, Optional, List
 import requests
  # No protobuf import needed if using JSON endpoint
@@ -17,8 +17,8 @@ import sys
 import time
 import os
 from dotenv import load_dotenv
-from ContextOfTheCode.sharedUtils.logger.logger import get_logger
-from ContextOfTheCode.sharedUtils.config import get_collector_config
+from sharedUtils.logger.logger import get_logger
+from sharedUtils.config import get_collector_config
 
 
 # Logger instance for this module

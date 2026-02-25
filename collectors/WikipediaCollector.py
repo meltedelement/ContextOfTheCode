@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 import requests
 import sys
 import time
-from ContextOfTheCode.sharedUtils.logger.logger import get_logger
-from ContextOfTheCode.sharedUtils.config import get_wikipedia_collector_config, get_collector_config
+from sharedUtils.logger.logger import get_logger
+from sharedUtils.config import get_wikipedia_collector_config, get_collector_config
 
 # Constants
 logger = get_logger(__name__)
