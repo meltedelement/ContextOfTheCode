@@ -6,9 +6,9 @@ import uuid
 import time
 import threading
 from pydantic import BaseModel, Field
-from ContextOfTheCode.sharedUtils.logger.logger import get_logger
-from ContextOfTheCode.sharedUtils.upload_queue.manager import get_upload_queue
-from ContextOfTheCode.sharedUtils.config import get_config
+from sharedUtils.logger.logger import get_logger
+from sharedUtils.upload_queue.manager import get_upload_queue
+from sharedUtils.config import get_config
 
 logger = get_logger(__name__)
 

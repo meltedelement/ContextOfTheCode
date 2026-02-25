@@ -35,9 +35,9 @@ import time
 import threading
 import json
 from typing import TYPE_CHECKING, Optional, Dict, Any
-from ContextOfTheCode.sharedUtils.upload_queue.base_queue import UploadQueue
-from ContextOfTheCode.sharedUtils.config.models import UploadQueueConfig
-from ContextOfTheCode.sharedUtils.logger.logger import get_logger
+from sharedUtils.upload_queue.base_queue import UploadQueue
+from sharedUtils.config.models import UploadQueueConfig
+from sharedUtils.logger.logger import get_logger
 
 if TYPE_CHECKING:
     from collectors.base_data_collector import DataMessage
