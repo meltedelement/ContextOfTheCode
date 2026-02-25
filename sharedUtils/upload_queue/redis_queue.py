@@ -44,6 +44,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+REDIS_CONNECT_TIMEOUT = 5    # Seconds to wait when opening a new Redis connection
+WORKER_STOP_TIMEOUT = 5      # Seconds to wait for the worker thread to shut down cleanly
+RETRY_BATCH_SIZE = 10        # Max retry-queue entries promoted to pending per loop iteration
+BRPOP_TIMEOUT = 1            # Seconds brpop blocks waiting for a new pending message
+
 
 class RedisUploadQueue(UploadQueue):
     """
@@ -125,7 +130,7 @@ class RedisUploadQueue(UploadQueue):
             db=self.redis_db,
             password=self.redis_password,
             decode_responses=True,  # Automatically decode bytes to strings
-            socket_connect_timeout=5,
+            socket_connect_timeout=REDIS_CONNECT_TIMEOUT,
             socket_keepalive=True
         )
 
@@ -162,7 +167,7 @@ class RedisUploadQueue(UploadQueue):
 
         # Wait for worker thread to finish (with timeout)
         if self.worker_thread and self.worker_thread.is_alive():
-            self.worker_thread.join(timeout=5)
+            self.worker_thread.join(timeout=WORKER_STOP_TIMEOUT)
             if self.worker_thread.is_alive():
                 logger.warning("Worker thread did not stop gracefully")
 
@@ -208,14 +213,14 @@ class RedisUploadQueue(UploadQueue):
             # Push to Redis list (LPUSH adds to left/head, BRPOP removes from right/tail = FIFO)
             self.redis_client.lpush(self.PENDING_QUEUE, envelope_json)
 
-            logger.debug("Queued message %s to Redis", message.message_id)
+            logger.debug("Queued snapshot %s to Redis", message.snapshot_id)
             return True
 
         except redis.RedisError as e:
-            logger.error("Failed to queue message %s: %s", message.message_id, str(e))
+            logger.error("Failed to queue snapshot %s: %s", message.snapshot_id, str(e))
             return False
         except Exception as e:
-            logger.error("Unexpected error queuing message %s: %s", message.message_id, str(e))
+            logger.error("Unexpected error queuing snapshot %s: %s", message.snapshot_id, str(e))
             return False
 
     def _worker_loop(self) -> None:
@@ -259,13 +264,13 @@ class RedisUploadQueue(UploadQueue):
         try:
             current_time = time.time()
 
-            # Get up to 10 messages whose retry time has passed
+            # Get up to RETRY_BATCH_SIZE messages whose retry time has passed
             ready_messages = self.redis_client.zrangebyscore(
                 self.RETRY_QUEUE,
                 min=0,
                 max=current_time,
                 start=0,
-                num=10
+                num=RETRY_BATCH_SIZE
             )
 
             for envelope_json in ready_messages:
@@ -278,7 +283,7 @@ class RedisUploadQueue(UploadQueue):
                 try:
                     envelope = json.loads(envelope_json)
                     payload_dict = json.loads(envelope.get("payload", "{}"))
-                    message_id = payload_dict.get("message_id", "unknown")
+                    message_id = payload_dict.get("snapshot_id", "unknown")
                     logger.debug("Message %s moved from retry queue to pending (retry_count=%d)",
                                  message_id, envelope.get("retry_count", "?"))
                 except (json.JSONDecodeError, TypeError):
@@ -302,7 +307,7 @@ class RedisUploadQueue(UploadQueue):
         """
         try:
             # Pop one message from the right (FIFO: LPUSH + BRPOP)
-            result = self.redis_client.brpop(self.PENDING_QUEUE, timeout=1)
+            result = self.redis_client.brpop(self.PENDING_QUEUE, timeout=BRPOP_TIMEOUT)
 
             if not result:
                 return False  # Queue is empty
@@ -317,7 +322,7 @@ class RedisUploadQueue(UploadQueue):
             # Extract message_id from the payload for logging
             try:
                 payload_dict = json.loads(payload_json)
-                message_id = payload_dict.get("message_id", "unknown")
+                message_id = payload_dict.get("snapshot_id", "unknown")
             except (json.JSONDecodeError, TypeError):
                 message_id = "unknown"
 

@@ -1,7 +1,7 @@
 """Base class for data collectors."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from typing import List, Optional
 import uuid
 import time
 import threading
@@ -16,11 +16,7 @@ logger = get_logger(__name__)
 # Kept for backwards compatibility
 CONFIG = get_config()
 
-
-class MetricEntry(BaseModel):
-    """Single metric entry with name and value."""
-    metric_name: str
-    metric_value: float
+THREAD_SHUTDOWN_GRACE_SECONDS = 5  # Extra seconds beyond collection_interval to wait for thread stop
 
 
 class MetricEntry(BaseModel):
@@ -35,18 +31,22 @@ class MetricEntry(BaseModel):
     Attributes:
         metric_name: Identifier for the metric (e.g., 'ram_usage_percent')
         metric_value: The measured value, always a float
+        unit: Short string describing the measurement unit (e.g. '%', 'MB', '°C')
     """
     metric_name: str
     metric_value: float
+    unit: str = ""
 
 
-class DataMessage(BaseModel):
-    """Data message from collectors."""
-    message_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: float = Field(default_factory=time.time)
-    device_id: str
-    source: str
-    metrics: List[MetricEntry]
+class SnapshotMessage(BaseModel):
+    """Snapshot message sent to the server from a collector."""
+    snapshot_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp:   float = Field(default_factory=time.time)
+    device_id:   str   # Must be a server-issued UUID
+    metrics:     List[MetricEntry]
+
+
+DataMessage = SnapshotMessage  # Backward-compat alias; remove after Redis queue flush
 
 
 class BaseDataCollector(ABC):
@@ -107,31 +107,23 @@ class BaseDataCollector(ABC):
         logger.debug("BaseDataCollector.collect_data() called — should be overridden.")
         pass
 
-    def export_to_data_model(self, message: DataMessage) -> None:
-        """Export message to upload queue."""
+    def export_to_data_model(self, message: SnapshotMessage) -> None:
+        """Export snapshot to upload queue."""
         queue = get_upload_queue()
         success = queue.put(message)
 
         if success:
-            logger.info("Queued message %s with %d metrics", message.message_id, len(message.metrics))
+            logger.info("Queued snapshot %s with %d metrics", message.snapshot_id, len(message.metrics))
         else:
-            logger.error("Failed to queue message %s", message.message_id)
+            logger.error("Failed to queue snapshot %s", message.snapshot_id)
 
-    def generate_message(self) -> DataMessage:
-        """Generate message with collected data and send to queue."""
-        data = self.collect_data()
+    def generate_message(self) -> SnapshotMessage:
+        """Generate snapshot with collected data and send to queue."""
+        metrics = self.collect_data()
 
-        # Convert dict to metrics list
-        metrics = [
-            MetricEntry(metric_name=key, metric_value=float(value))
-            for key, value in data.model_dump().items()
-            if isinstance(value, (int, float))
-        ]
-
-        message = DataMessage(
+        message = SnapshotMessage(
             device_id=self.device_id,
-            source=self.source,
-            metrics=metrics
+            metrics=metrics,
         )
 
         self.export_to_data_model(message)
@@ -158,10 +150,10 @@ class BaseDataCollector(ABC):
                 # Collect and queue data
                 message = self.generate_message()
                 logger.debug(
-                    "%s: Collected %d metrics (message_id=%s)",
+                    "%s: Collected %d metrics (snapshot_id=%s)",
                     self.__class__.__name__,
                     len(message.metrics),
-                    message.message_id[:8] + "..."
+                    message.snapshot_id[:8] + "..."
                 )
 
             except Exception as e:
@@ -214,7 +206,7 @@ class BaseDataCollector(ABC):
         self._running = False
 
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=self.collection_interval + 5)
+            self._thread.join(timeout=self.collection_interval + THREAD_SHUTDOWN_GRACE_SECONDS)
             if self._thread.is_alive():
                 logger.warning("%s: Thread did not stop cleanly", self.__class__.__name__)
             else:

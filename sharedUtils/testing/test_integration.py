@@ -31,9 +31,8 @@ def test_collector_basic():
         # Test 3: Generate a message
         print("\n3. Generating and sending message...")
         message = collector.generate_message()
-        print(f"   ✓ Message generated: {message.message_id}")
+        print(f"   ✓ Message generated: {message.snapshot_id}")
         print(f"   - Device ID: {message.device_id}")
-        print(f"   - Source: {message.source}")
         print(f"   - Metrics count: {len(message.metrics)}")
 
         # Test 4: Display metrics
@@ -58,4 +57,4 @@ if __name__ == "__main__":
     success = test_collector_basic()
     sys.exit(0 if success else 1)
 
-        from ContextOfTheCode.sharedUtils.upload_queue import get_upload_queue
+        from sharedUtils.upload_queue import get_upload_queue

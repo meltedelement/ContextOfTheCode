@@ -6,10 +6,10 @@
     "device_id": "local-system-001",
     "source": "local",
     "metrics": [
-      { "metric_name": "ram_usage_percent", "metric_value": 45.2 },
-      { "metric_name": "ram_used_mb", "metric_value": 7234.5 },
-      { "metric_name": "cpu_usage_percent", "metric_value": 23.5 },
-      { "metric_name": "cpu_temp_celsius", "metric_value": 58.3 }
+      { "metric_name": "ram_usage_percent", "metric_value": 45.2,   "unit": "%" },
+      { "metric_name": "ram_used_mb",       "metric_value": 7234.5, "unit": "MB" },
+      { "metric_name": "cpu_usage_percent", "metric_value": 23.5,   "unit": "%" },
+      { "metric_name": "cpu_temp_celsius",  "metric_value": 58.3,   "unit": "°C" }
     ]
   },
   "field_definitions": {
@@ -17,6 +17,7 @@
     "timestamp": "Unix timestamp (float), auto-generated at message creation",
     "device_id": "String identifier for the source device or collector instance",
     "source": "String identifier for the collector type (e.g., 'local', 'wikipedia', 'mobile')",
-    "metrics": "List of MetricEntry objects, each with a metric_name (string) and metric_value (float)"
+    "metrics": "List of MetricEntry objects, each with a metric_name (string), metric_value (float), and unit (string)",
+    "unit": "Short string describing the measurement unit (e.g. '%', 'MB', '°C'). Empty string if dimensionless."
   }
 }

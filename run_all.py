@@ -3,9 +3,10 @@
 System Monitoring Tool - Main Orchestrator
 
 Starts and manages all components:
-- Flask API server (receives and stores metrics)
 - Upload queue worker (auto-started by queue manager)
 - Data collectors (LocalCollector, WikipediaCollector)
+
+The Flask API server runs separately on the remote server.
 
 Usage:
     python run_all.py
@@ -14,10 +15,16 @@ Usage:
 import sys
 import time
 import signal
-import subprocess
-import socket
-from typing import Optional
-from pathlib import Path
+
+try:
+    import redis as redis_lib
+except ImportError:
+    redis_lib = None
+
+try:
+    import requests as requests_lib
+except ImportError:
+    requests_lib = None
 
 from collectors.LocalCollector import LocalDataCollector
 from collectors.WikipediaCollector import WikipediaCollector
@@ -27,8 +34,11 @@ from ContextOfTheCode.sharedUtils.config import get_typed_config
 
 logger = get_logger(__name__)
 
-# Global state for graceful shutdown
-flask_process: Optional[subprocess.Popen] = None
+FLASK_HEALTH_POLL_INTERVAL = 0.5    # Seconds between /health polls
+FLASK_HEALTH_TIMEOUT = 30           # Max seconds to wait for Flask to become healthy
+REDIS_CHECK_TIMEOUT_SECONDS = 2     # Socket connect timeout when verifying Redis is reachable
+SHUTDOWN_POLL_INTERVAL_SECONDS = 1  # How often the main loop checks for a stop signal
+
 running = True
 
 
@@ -39,14 +49,17 @@ def check_redis_running() -> bool:
 
     logger.info("Checking Redis connection at %s:%d...", redis_config.redis_host, redis_config.redis_port)
 
+    if redis_lib is None:
+        logger.error("✗ redis package is not installed — cannot check Redis")
+        return False
+
     try:
-        import redis
-        client = redis.Redis(
+        client = redis_lib.Redis(
             host=redis_config.redis_host,
             port=redis_config.redis_port,
             db=redis_config.redis_db,
             password=redis_config.redis_password,
-            socket_connect_timeout=2
+            socket_connect_timeout=REDIS_CHECK_TIMEOUT_SECONDS
         )
         client.ping()
         logger.info("✓ Redis is running")
@@ -61,61 +74,96 @@ def check_redis_running() -> bool:
         return False
 
 
-def check_port_available(port: int, host: str = 'localhost') -> bool:
-    """Check if a port is available."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.settimeout(1)
-        result = sock.connect_ex((host, port))
-        return result != 0  # Port is available if connection fails
-    finally:
-        sock.close()
+def wait_for_flask_healthy(base_url: str) -> bool:
+    """
+    Poll GET /health until Flask responds 200 or timeout expires.
+
+    Returns True if Flask became healthy within FLASK_HEALTH_TIMEOUT seconds.
+    """
+    if requests_lib is None:
+        logger.error("requests package not available — cannot poll /health")
+        return False
+
+    health_url = f"{base_url}/health"
+    deadline = time.time() + FLASK_HEALTH_TIMEOUT
+
+    while time.time() < deadline:
+        try:
+            resp = requests_lib.get(health_url, timeout=2)
+            if resp.status_code == 200:
+                logger.info("✓ Flask API server is healthy")
+                return True
+        except Exception:
+            pass  # Not ready yet
+        time.sleep(FLASK_HEALTH_POLL_INTERVAL)
+
+    logger.error("✗ Flask did not become healthy within %ds", FLASK_HEALTH_TIMEOUT)
+    return False
 
 
-def start_flask_server() -> Optional[subprocess.Popen]:
-    """Start the Flask API server in a subprocess."""
-    logger.info("Starting Flask API server...")
+def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict:
+    """
+    Register this aggregator and its devices with the server.
 
-    # Check if port 5000 is already in use
-    if not check_port_available(5000):
-        logger.warning("⚠ Port 5000 is already in use - Flask may already be running")
-        logger.warning("Continuing without starting new Flask instance...")
-        return None
+    1. POST /aggregators → receive aggregator_id (idempotent)
+    2. For each enabled collector, POST /devices → receive device_id UUID
 
-    try:
-        flask_script = Path(__file__).parent / "server" / "app.py"
-        process = subprocess.Popen(
-            [sys.executable, str(flask_script)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1  # Line buffered
+    Returns a dict mapping source name to server-issued device_id UUID,
+    e.g. {"local": "uuid-a", "wikipedia": "uuid-b"}.
+    """
+    if requests_lib is None:
+        raise RuntimeError("requests package not available — cannot register")
+
+    config = get_typed_config()
+    session = requests_lib.Session()
+    session.headers.update({"Content-Type": "application/json"})
+
+    # 1. Register aggregator
+    resp = session.post(f"{base_url}/aggregators", json={"name": aggregator_name}, timeout=10)
+    resp.raise_for_status()
+    aggregator_id = resp.json()["aggregator_id"]
+    logger.info("Aggregator '%s' registered: %s", aggregator_name, aggregator_id)
+
+    # 2. Register each enabled device
+    device_ids = {}
+    enabled = config.collectors.enabled_collectors
+
+    source_map = [
+        ("local",       "local-system",  "local"),
+        ("third_party", "wikipedia-api", "wikipedia"),
+    ]
+
+    for collector_key, device_name, source in source_map:
+        if collector_key not in enabled:
+            continue
+
+        resp = session.post(
+            f"{base_url}/devices",
+            json={
+                "aggregator_id": aggregator_id,
+                "name": device_name,
+                "source": source,
+            },
+            timeout=10,
         )
+        resp.raise_for_status()
+        device_id = resp.json()["device_id"]
+        device_ids[source] = device_id
+        logger.info("Device '%s' (source=%s) registered: %s", device_name, source, device_id)
 
-        # Give Flask a moment to start
-        time.sleep(2)
-
-        # Check if process is still running
-        if process.poll() is None:
-            logger.info("✓ Flask API server started (PID: %d)", process.pid)
-            logger.info("  Endpoint: http://localhost:5000/api/metrics")
-            return process
-        else:
-            stderr = process.stderr.read() if process.stderr else ""
-            logger.error("✗ Flask server failed to start: %s", stderr)
-            return None
-
-    except Exception as e:
-        logger.error("✗ Failed to start Flask server: %s", e)
-        return None
+    session.close()
+    return device_ids
 
 
-def start_collectors():
+def start_collectors(device_ids: dict):
     """
     Initialize and start all enabled collectors in async mode.
 
     Each collector runs in its own background thread with its own
     collection interval, pushing data to the upload queue autonomously.
+
+    Args:
+        device_ids: Mapping of source → server-issued device UUID
 
     Returns:
         List of (name, collector) tuples for active collectors
@@ -124,19 +172,22 @@ def start_collectors():
     collectors = []
 
     if "local" in config.collectors.enabled_collectors:
-        logger.info("Initializing LocalDataCollector (interval=%ds)...", config.local_collector.collection_interval)
-        local_collector = LocalDataCollector(device_id="local-pc-001")
-        collectors.append(("LocalCollector", local_collector))
+        device_id = device_ids.get("local")
+        if not device_id:
+            logger.error("No device_id for local collector — skipping")
+        else:
+            logger.info("Initializing LocalDataCollector (interval=%ds)...", config.local_collector.collection_interval)
+            local_collector = LocalDataCollector(device_id=device_id)
+            collectors.append(("LocalCollector", local_collector))
 
     if "third_party" in config.collectors.enabled_collectors:
-        logger.info("Initializing WikipediaCollector (interval=%ds)...", config.wikipedia_collector.collection_interval)
-        wiki_collector = WikipediaCollector(device_id="wikipedia-api-001")
-        collectors.append(("WikipediaCollector", wiki_collector))
-
-    # Note: Mobile collector would go here when implemented
-    # if "mobile" in config.collectors.enabled_collectors:
-    #     mobile_collector = MobileCollector(device_id="mobile-device-001")
-    #     collectors.append(("MobileCollector", mobile_collector))
+        device_id = device_ids.get("wikipedia")
+        if not device_id:
+            logger.error("No device_id for wikipedia collector — skipping")
+        else:
+            logger.info("Initializing WikipediaCollector (interval=%ds)...", config.wikipedia_collector.collection_interval)
+            wiki_collector = WikipediaCollector(device_id=device_id)
+            collectors.append(("WikipediaCollector", wiki_collector))
 
     if not collectors:
         logger.warning("No collectors enabled in config.toml")
@@ -149,7 +200,6 @@ def start_collectors():
     logger.info("=" * 60)
     logger.info("")
 
-    # Start all collectors
     for name, collector in collectors:
         logger.info("Starting %s...", name)
         collector.start()
@@ -171,14 +221,12 @@ def wait_for_shutdown(collectors):
     global running
 
     try:
-        # Just sleep while collectors run in background
         while running:
-            time.sleep(1)
+            time.sleep(SHUTDOWN_POLL_INTERVAL_SECONDS)
     except KeyboardInterrupt:
         logger.info("")
         logger.info("Interrupted by user")
 
-    # Stop all collectors
     logger.info("Stopping collectors...")
     for name, collector in collectors:
         logger.info("Stopping %s...", name)
@@ -196,41 +244,24 @@ def signal_handler(signum, frame):
 
 def cleanup():
     """Clean up resources on shutdown."""
-    global flask_process
-
     logger.info("Cleaning up resources...")
 
-    # Stop upload queue worker
     try:
         stop_upload_queue()
         logger.info("✓ Upload queue stopped")
     except Exception as e:
         logger.error("Error stopping upload queue: %s", e)
 
-    # Stop Flask server
-    if flask_process and flask_process.poll() is None:
-        logger.info("Stopping Flask server...")
-        flask_process.terminate()
-        try:
-            flask_process.wait(timeout=5)
-            logger.info("✓ Flask server stopped")
-        except subprocess.TimeoutExpired:
-            logger.warning("Flask server did not stop gracefully, forcing shutdown...")
-            flask_process.kill()
-
     logger.info("Shutdown complete")
 
 
 def main():
     """Main entry point."""
-    global flask_process
-
     logger.info("=" * 60)
     logger.info("System Monitoring Tool - Starting All Components")
     logger.info("=" * 60)
     logger.info("")
 
-    # Set up signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -242,13 +273,24 @@ def main():
 
         logger.info("")
 
-        # Step 2: Start Flask API server
-        flask_process = start_flask_server()
+        # Step 2: Check remote Flask server is reachable
+        config = get_typed_config()
+        registration_base_url = config.upload_queue.registration_base_url
+        if not wait_for_flask_healthy(registration_base_url):
+            logger.error("Flask health check failed — aborting")
+            return 1
+
         logger.info("")
 
-        # Step 3: Start collectors (each runs in its own thread)
-        # The upload queue worker auto-starts when first collector queues data
-        collectors = start_collectors()
+        # Step 3: Register aggregator and devices
+        aggregator_name = config.aggregator.name
+        logger.info("Registering aggregator '%s'...", aggregator_name)
+        device_ids = register_aggregator_and_devices(registration_base_url, aggregator_name)
+        logger.info("Device IDs: %s", device_ids)
+        logger.info("")
+
+        # Step 4: Start collectors with server-issued UUIDs
+        collectors = start_collectors(device_ids)
 
         if not collectors:
             logger.error("No collectors started")
@@ -257,7 +299,6 @@ def main():
         logger.info("✓ All components initialized successfully")
         logger.info("")
 
-        # Wait for shutdown signal
         wait_for_shutdown(collectors)
 
     except KeyboardInterrupt:

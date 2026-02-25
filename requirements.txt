@@ -9,4 +9,4 @@ redis>=5.0.0             # For persistent upload queue
 # Server dependencies
 flask>=3.0.0             # API server
 sqlalchemy>=2.0.0        # ORM for database operations
-pymysql>=1.1.0           # MySQL driver for PythonAnywhere
+pymysql>=1.1.0           # MySQL driver
