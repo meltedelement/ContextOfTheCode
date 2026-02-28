@@ -22,7 +22,7 @@ default_interval = 60
 default_collection_interval = 60
 
 # Enable/disable specific collector types
-enabled_collectors = ["local", "mobile", "third_party"]
+enabled_collectors = ["local", "mobile", "third_party", "transport"]
 
 # CPU sampling interval in seconds for accuracy
 cpu_sample_interval = 1.0
@@ -43,6 +43,16 @@ collection_window = 60
 
 # User-Agent string for Wikipedia API requests
 user_agent = "WikipediaDataCollector/1.0 (Educational Project)"
+
+[transport_collector]
+# How often to collect transport metrics (seconds)
+collection_interval = 60
+
+# Vehicle positions API endpoint
+api_url = "https://api.nationaltransport.ie/gtfsr/v2/Vehicles?format=json"
+
+# Trip updates API endpoint
+tripupdates_url = "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json"
 
 [aggregator]
 # Human-readable name for this aggregator (machine running run_all.py)
