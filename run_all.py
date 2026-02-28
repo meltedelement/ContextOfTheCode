@@ -15,6 +15,7 @@ Usage:
 import sys
 import time
 import signal
+import os
 
 try:
     import redis as redis_lib
@@ -28,9 +29,10 @@ except ImportError:
 
 from collectors.LocalCollector import LocalDataCollector
 from collectors.WikipediaCollector import WikipediaCollector
-from ContextOfTheCode.sharedUtils.logger.logger import get_logger
-from ContextOfTheCode.sharedUtils.upload_queue.manager import stop_upload_queue
-from ContextOfTheCode.sharedUtils.config import get_typed_config
+from collectors.TransportCollector import TransportCollector
+from sharedUtils.logger.logger import get_logger
+from sharedUtils.upload_queue.manager import stop_upload_queue
+from sharedUtils.config import get_typed_config
 
 logger = get_logger(__name__)
 
@@ -131,6 +133,7 @@ def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict
     source_map = [
         ("local",       "local-system",  "local"),
         ("third_party", "wikipedia-api", "wikipedia"),
+        ("transport",   "transport-api", "transport_api"),
     ]
 
     for collector_key, device_name, source in source_map:
@@ -188,6 +191,20 @@ def start_collectors(device_ids: dict):
             logger.info("Initializing WikipediaCollector (interval=%ds)...", config.wikipedia_collector.collection_interval)
             wiki_collector = WikipediaCollector(device_id=device_id)
             collectors.append(("WikipediaCollector", wiki_collector))
+
+    if "transport" in config.collectors.enabled_collectors:
+        device_id = device_ids.get("transport_api")
+        if not device_id:
+            logger.error("No device_id for transport collector — skipping")
+        else:
+            logger.info("Initializing TransportCollector (interval=%ds)...", config.transport_collector.collection_interval)
+            transport_collector = TransportCollector(
+                device_id=device_id,
+                api_url=config.transport_collector.api_url,
+                primary_key=os.environ.get("PRIMARY_KEY"),
+                secondary_key=os.environ.get("SECONDARY_KEY"),
+            )
+            collectors.append(("TransportCollector", transport_collector))
 
     if not collectors:
         logger.warning("No collectors enabled in config.toml")

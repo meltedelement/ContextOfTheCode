@@ -1,6 +1,6 @@
 """Configuration module."""
 
-from ContextOfTheCode.sharedUtils.config.loader import (
+from sharedUtils.config.loader import (
     get_config,
     get_typed_config,
     get_collector_config,
@@ -10,7 +10,7 @@ from ContextOfTheCode.sharedUtils.config.loader import (
     get_logging_config,
     get_data_model_config,
 )
-from ContextOfTheCode.sharedUtils.config.models import (
+from sharedUtils.config.models import (
     AppConfig,
     CollectorsConfig,
     LocalCollectorConfig,
