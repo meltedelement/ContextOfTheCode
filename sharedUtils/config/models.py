@@ -106,6 +106,20 @@ class UploadQueueConfig(BaseModel):
         return v
 
 
+class TransportCollectorConfig(BaseModel):
+    """Configuration for transport API collector."""
+    collection_interval: int = Field(default=60, description="Collection interval in seconds")
+    api_url: str = Field(description="Transport API endpoint URL")
+    tripupdates_url: str = Field(description="Trip updates API endpoint URL")
+
+    @field_validator("collection_interval")
+    @classmethod
+    def validate_interval(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("collection_interval must be at least 1 second")
+        return v
+
+
 class AggregatorConfig(BaseModel):
     """Configuration for aggregator identity."""
     name: str = Field(description="Human-readable name for this aggregator")
@@ -118,5 +132,6 @@ class AppConfig(BaseModel):
     collectors: CollectorsConfig
     local_collector: LocalCollectorConfig
     wikipedia_collector: WikipediaCollectorConfig
+    transport_collector: TransportCollectorConfig
     upload_queue: UploadQueueConfig
     aggregator: AggregatorConfig
