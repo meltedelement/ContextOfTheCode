@@ -59,10 +59,10 @@ redis_db = 0
 # redis_password = "your_password_here"  # Uncomment if Redis requires authentication
 
 # Database API endpoint (where messages are uploaded)
-api_endpoint = "http://100.67.157.90:5000/api/metrics"
+api_endpoint = "http://200.69.13.70:5000/api/metrics"
 
 # Base URL for device/aggregator registration endpoints
-registration_base_url = "http://100.67.157.90:5000"
+registration_base_url = "http://200.69.13.70:5000"
 # api_key = "your_api_key_here"  # Uncomment to add API key authentication
 
 # Upload retry policy
