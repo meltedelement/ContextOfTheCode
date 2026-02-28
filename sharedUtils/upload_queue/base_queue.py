@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collectors.base_data_collector import DataMessage
+    from collectors.base_data_collector import SnapshotMessage
 
 
 class UploadQueue(ABC):
@@ -22,12 +22,12 @@ class UploadQueue(ABC):
     """
 
     @abstractmethod
-    def put(self, message: 'DataMessage') -> bool:
+    def put(self, message: 'SnapshotMessage') -> bool:
         """
         Add a message to the upload queue.
 
         Args:
-            message: DataMessage object to be queued for upload
+            message: SnapshotMessage object to be queued for upload
 
         Returns:
             True if message was successfully queued, False otherwise

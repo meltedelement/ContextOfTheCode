@@ -11,17 +11,17 @@ Architecture:
 - Background worker thread continuously processes messages without blocking
 
 Message Envelope:
-    Messages are stored as JSON envelopes wrapping the raw DataMessage payload:
+    Messages are stored as JSON envelopes wrapping the raw SnapshotMessage payload:
     {
         "retry_count": int,         # number of failed attempts so far
         "first_queued_at": float,   # Unix timestamp when first enqueued
         "last_error": str | None,   # error string from the most recent failure
-        "payload": str              # DataMessage serialised as a JSON string
+        "payload": str              # SnapshotMessage serialised as a JSON string
     }
-    The envelope is internal to this module — callers interact only with DataMessage.
+    The envelope is internal to this module — callers interact only with SnapshotMessage.
 
 Retry Flow:
-    1. put() wraps DataMessage in envelope (retry_count=0) → metrics:pending
+    1. put() wraps SnapshotMessage in envelope (retry_count=0) → metrics:pending
     2. Worker pops envelope, calls _attempt_upload() once (no blocking sleep)
     3. Success → done
     4. Failure, retries remaining → zadd to metrics:retry with score=now+backoff_delay
@@ -40,7 +40,7 @@ from sharedUtils.config.models import UploadQueueConfig
 from sharedUtils.logger.logger import get_logger
 
 if TYPE_CHECKING:
-    from collectors.base_data_collector import DataMessage
+    from collectors.base_data_collector import SnapshotMessage
 
 logger = get_logger(__name__)
 
@@ -183,15 +183,15 @@ class RedisUploadQueue(UploadQueue):
 
         logger.info("RedisUploadQueue stopped")
 
-    def put(self, message: 'DataMessage') -> bool:
+    def put(self, message: 'SnapshotMessage') -> bool:
         """
         Add a message to the Redis queue (non-blocking).
 
-        Wraps the DataMessage in an envelope that carries retry metadata.
-        The envelope is internal to the queue — callers interact only with DataMessage.
+        Wraps the SnapshotMessage in an envelope that carries retry metadata.
+        The envelope is internal to the queue — callers interact only with SnapshotMessage.
 
         Args:
-            message: DataMessage object to queue
+            message: SnapshotMessage object to queue
 
         Returns:
             True if message was successfully queued, False otherwise
@@ -317,7 +317,7 @@ class RedisUploadQueue(UploadQueue):
             envelope = json.loads(envelope_json)
 
             retry_count = envelope.get("retry_count", 0)
-            payload_json = envelope.get("payload", envelope_json)  # fallback for legacy raw messages
+            payload_json = envelope["payload"]
 
             # Extract message_id from the payload for logging
             try:
@@ -378,7 +378,7 @@ class RedisUploadQueue(UploadQueue):
         RETRY_QUEUE sorted set so the worker thread is never blocked.
 
         Args:
-            payload_json: Serialized DataMessage JSON string (the envelope payload)
+            payload_json: Serialized SnapshotMessage JSON string (the envelope payload)
             message_id: Message ID for logging
 
         Returns:

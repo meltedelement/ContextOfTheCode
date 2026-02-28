@@ -1,6 +1,6 @@
 """Type-safe Pydantic models for configuration."""
 
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -30,7 +30,6 @@ class CollectorsConfig(BaseModel):
     """Configuration for data collectors (shared settings)."""
     default_interval: int = Field(default=60, description="Collection interval in seconds")
     default_collection_interval: int = Field(default=60, description="Default collection interval fallback")
-    enabled_collectors: List[str] = Field(default_factory=list, description="Enabled collector types")
     cpu_sample_interval: float = Field(default=1.0, description="CPU sampling interval in seconds")
     metric_precision: int = Field(default=1, description="Decimal precision for metrics")
 
@@ -51,6 +50,7 @@ class CollectorsConfig(BaseModel):
 
 class LocalCollectorConfig(BaseModel):
     """Configuration for local system collector."""
+    enabled: bool = Field(default=True, description="Whether this collector is enabled")
     collection_interval: int = Field(default=10, description="Collection interval in seconds")
 
     @field_validator("collection_interval")
@@ -63,6 +63,7 @@ class LocalCollectorConfig(BaseModel):
 
 class WikipediaCollectorConfig(BaseModel):
     """Configuration for Wikipedia collector."""
+    enabled: bool = Field(default=True, description="Whether this collector is enabled")
     collection_interval: int = Field(default=60, description="Collection interval in seconds")
     collection_window: int = Field(default=60, description="Time window in seconds")
     user_agent: str = Field(description="User-Agent for API requests")

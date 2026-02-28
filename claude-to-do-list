@@ -1,0 +1,43 @@
+# Context of the Code — Remaining Improvements
+
+Items identified during collector code review that haven't been addressed yet.
+
+---
+
+## Collector Robustness
+
+- [ ] **Thread cleanup has no force-kill path**
+  `base_data_collector.py` waits `collection_interval + 5s` for threads to join,
+  then just logs a warning if still alive. A hung `collect_data()` creates zombie
+  threads. Consider daemon threads or a `threading.Event` for cancellation.
+
+- [ ] **WikipediaCollector silently returns 0 on API failure**
+  When the API call fails, `collect_data()` returns `edit_count = 0`, which is
+  indistinguishable from "Wikipedia had zero edits" in the dashboard. Options:
+  add an `api_error_count` metric, or omit the metric entirely on failure.
+
+## Timestamps
+
+- [ ] **No explicit UTC assertion on timestamps**
+  `SnapshotMessage.timestamp` uses `time.time()` which is UTC epoch, but
+  there's no documentation or enforcement. The spec mentions needing UTC + offset.
+  Consider `datetime.now(timezone.utc).timestamp()` to be explicit, and document
+  the convention.
+
+## API & Security
+
+- [ ] **API key is configured but never validated**
+  The upload queue can send `X-API-Key` headers, but Flask doesn't check them.
+  Either wire up validation in the Flask app or remove the config field.
+
+## Server & Dashboard
+
+- [ ] **Dashboard queries could be slow at scale**
+  Dashboard fetches all snapshots then groups in Python. For large datasets,
+  aggregate server-side with SQL GROUP BY or add explicit query limits.
+
+## Config Cleanup
+
+- [ ] **`api_endpoint` and `registration_base_url` point at the same server**
+  These could be unified into a single `server_url` with paths derived from it,
+  reducing config duplication and the chance of them drifting apart.

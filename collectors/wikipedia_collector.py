@@ -1,6 +1,6 @@
 """Wikipedia edit collector using MediaWiki Recent Changes API."""
 
-from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry
+from collectors.base_data_collector import BaseDataCollector, MetricEntry
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import requests
@@ -11,7 +11,6 @@ from sharedUtils.config import get_wikipedia_collector_config, get_collector_con
 
 # Constants
 logger = get_logger(__name__)
-SOURCE_TYPE = "wikipedia"  # Source identifier for Wikipedia collector
 DEFAULT_LANGUAGE = "en"  # Default to English Wikipedia
 API_TIMEOUT = 10  # HTTP request timeout in seconds
 NAMESPACE_ARTICLES = 0  # Namespace 0 = article pages (not talk pages, etc.)
@@ -21,6 +20,9 @@ TIMESTAMP_FORMAT = "%H:%M:%S"  # Display format for log timestamps in __main__ o
 class WikipediaCollector(BaseDataCollector):
     """Wikipedia edit collector that monitors editing activity via MediaWiki API."""
 
+    SOURCE = "wikipedia"
+    DEVICE_NAME = "wikipedia-api"
+
     def __init__(self, device_id: str, wikipedia_language: str = DEFAULT_LANGUAGE):
         """Initialize Wikipedia edit collector."""
         # Load collector-specific config
@@ -28,7 +30,7 @@ class WikipediaCollector(BaseDataCollector):
 
         # Initialize base with collection interval
         super().__init__(
-            source=SOURCE_TYPE,
+            source=self.SOURCE,
             device_id=device_id,
             collection_interval=config.collection_interval
         )

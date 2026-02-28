@@ -8,13 +8,8 @@ import threading
 from pydantic import BaseModel, Field
 from sharedUtils.logger.logger import get_logger
 from sharedUtils.upload_queue.manager import get_upload_queue
-from sharedUtils.config import get_config
 
 logger = get_logger(__name__)
-
-# Config is now loaded lazily via get_config()
-# Kept for backwards compatibility
-CONFIG = get_config()
 
 THREAD_SHUTDOWN_GRACE_SECONDS = 5  # Extra seconds beyond collection_interval to wait for thread stop
 
@@ -44,9 +39,6 @@ class SnapshotMessage(BaseModel):
     timestamp:   float = Field(default_factory=time.time)
     device_id:   str   # Must be a server-issued UUID
     metrics:     List[MetricEntry]
-
-
-DataMessage = SnapshotMessage  # Backward-compat alias; remove after Redis queue flush
 
 
 class BaseDataCollector(ABC):

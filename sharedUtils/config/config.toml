@@ -21,9 +21,6 @@ schema_path = "data_model.json"
 default_interval = 60
 default_collection_interval = 60
 
-# Enable/disable specific collector types
-enabled_collectors = ["local", "mobile", "third_party"]
-
 # CPU sampling interval in seconds for accuracy
 cpu_sample_interval = 1.0
 
@@ -31,10 +28,14 @@ cpu_sample_interval = 1.0
 metric_precision = 1
 
 [local_collector]
+# Set to false to disable this collector
+# enabled = false
 # How often to collect local system metrics (seconds)
 collection_interval = 10
 
 [wikipedia_collector]
+# Set to false to disable this collector
+# enabled = false
 # How often to collect Wikipedia metrics (seconds)
 collection_interval = 60
 

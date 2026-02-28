@@ -7,7 +7,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from collectors.LocalCollector import LocalDataCollector
+from collectors.local_collector import LocalDataCollector
 from sharedUtils.upload_queue import get_upload_queue
 
 

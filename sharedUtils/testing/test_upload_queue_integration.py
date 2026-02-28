@@ -8,8 +8,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from collectors.LocalCollector import LocalDataCollector
-from collectors.WikipediaCollector import WikipediaCollector
+from collectors.local_collector import LocalDataCollector
+from collectors.wikipedia_collector import WikipediaCollector
 from sharedUtils.upload_queue import get_upload_queue
 from sharedUtils.logger.logger import get_logger
 
