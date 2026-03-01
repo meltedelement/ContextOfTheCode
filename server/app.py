@@ -12,12 +12,14 @@ from sqlalchemy import asc
 from server.database import Base, engine, get_db
 from server.models import Aggregator, Device, Snapshot, Metric
 from sharedUtils.logger.logger import get_logger
+from flask_cors import CORS
 
 logger = get_logger(__name__)
 
 DEFAULT_QUERY_LIMIT = 100  # Max snapshots returned by GET /api/metrics when no limit param is given
 
 app = Flask(__name__)
+CORS(app)
 
 # Create tables on startup if they don't already exist
 Base.metadata.create_all(bind=engine)
