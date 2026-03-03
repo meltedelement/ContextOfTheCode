@@ -12,12 +12,14 @@ from sqlalchemy import asc
 from server.database import Base, engine, get_db
 from server.models import Aggregator, Device, Snapshot, Metric
 from sharedUtils.logger.logger import get_logger
+from flask_cors import CORS
 
 logger = get_logger(__name__)
 
 DEFAULT_QUERY_LIMIT = 100  # Max snapshots returned by GET /api/metrics when no limit param is given
 
 app = Flask(__name__)
+CORS(app)
 
 # Create tables on startup if they don't already exist
 Base.metadata.create_all(bind=engine)
@@ -257,4 +259,4 @@ def health_check():
 if __name__ == '__main__':
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     logger.info("Starting Flask API server (debug=%s)...", debug)
-    app.run(host='0.0.0.0', port=5000, debug=debug)
+    app.run(host='0.0.0.0', port=5001, debug=debug)
