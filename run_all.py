@@ -16,6 +16,8 @@ import sys
 import time
 import signal
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 try:
     import redis as redis_lib

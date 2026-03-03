@@ -34,7 +34,7 @@ class TransportCollector(BaseDataCollector):
 	The collector can be extended to handle custom API response formats and authentication.
 	"""
 
-	def __init__(self, device_id: str, api_url: str, tripupdates_url: str, primary_key: Optional[str] = None, secondary_key: Optional[str] = None, format_param: Optional[str] = None):
+	def __init__(self, device_id: str, api_url: str, primary_key: Optional[str] = None, secondary_key: Optional[str] = None, format_param: Optional[str] = None):
 		"""
 		Initialize the TransportCollector.
 
@@ -69,9 +69,8 @@ class TransportCollector(BaseDataCollector):
 			headers["x-api-key"] = self.primary_key
 		if self.secondary_key:
 			headers["X-Secondary-Key"] = self.secondary_key
-		params = {"format": "json"}
 		try:
-			response = requests.get(self.api_url, headers=headers, params=params, timeout=API_TIMEOUT)
+			response = requests.get(self.api_url, headers=headers, timeout=API_TIMEOUT)
 			response.raise_for_status()
 			data = response.json()
 			logger.info("API returned status %s", response.status_code)
