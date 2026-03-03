@@ -1,6 +1,6 @@
 """Local system metrics collector (CPU, RAM, temperature)."""
 
-from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry
+from collectors.base_data_collector import BaseDataCollector, MetricEntry
 from typing import List, Optional
 import psutil
 from sharedUtils.logger.logger import get_logger

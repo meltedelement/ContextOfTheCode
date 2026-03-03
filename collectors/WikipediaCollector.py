@@ -1,6 +1,6 @@
 """Wikipedia edit collector using MediaWiki Recent Changes API."""
 
-from collectors.base_data_collector import BaseDataCollector, DataMessage, MetricEntry
+from collectors.base_data_collector import BaseDataCollector, MetricEntry
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import requests
