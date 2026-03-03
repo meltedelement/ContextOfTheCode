@@ -203,6 +203,7 @@ def start_collectors(device_ids: dict):
             transport_collector = TransportCollector(
                 device_id=device_id,
                 api_url=config.transport_collector.api_url,
+                tripupdates_url=config.transport_collector.tripupdates_url,
                 primary_key=os.environ.get("PRIMARY_KEY"),
                 secondary_key=os.environ.get("SECONDARY_KEY"),
             )

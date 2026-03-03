@@ -22,7 +22,7 @@ ChartJS.register(
   Legend
 );
 
-const API_BASE = "http://100.67.157.90:5001";
+const API_BASE = "";
 
 interface Metric {
   metric_name: string;
