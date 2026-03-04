@@ -7,7 +7,7 @@ import uuid
 
 from flask import Flask, request, jsonify
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import asc
+from sqlalchemy import asc, desc
 
 from server.database import Base, engine, get_db
 from server.models import Aggregator, Device, Snapshot, Metric
@@ -212,8 +212,8 @@ def get_metrics():
             if since is not None:
                 query = query.filter(Snapshot.collected_at > since)
 
-            query = query.order_by(asc(Snapshot.collected_at)).limit(limit)
-            snapshots = query.all()
+            query = query.order_by(desc(Snapshot.collected_at)).limit(limit)
+            snapshots = list(reversed(query.all()))
 
             result = [
                 {
