@@ -34,13 +34,14 @@ class TransportCollector(BaseDataCollector):
 	The collector can be extended to handle custom API response formats and authentication.
 	"""
 
-	def __init__(self, device_id: str, api_url: str, primary_key: Optional[str] = None, secondary_key: Optional[str] = None, format_param: Optional[str] = None):
+	def __init__(self, device_id: str, api_url: str, tripupdates_url: str, primary_key: Optional[str] = None, secondary_key: Optional[str] = None, format_param: Optional[str] = None):
 		"""
 		Initialize the TransportCollector.
 
 		Args:
 			device_id (str): Unique identifier for the device or data source.
-			api_url (str): The full URL of the transport API endpoint.
+			api_url (str): The full URL of the vehicle positions API endpoint.
+			tripupdates_url (str): The full URL of the trip updates API endpoint.
 			primary_key (Optional[str]): Primary key for authentication (sent as header).
 			secondary_key (Optional[str]): Secondary key for authentication (sent as header).
 			format_param (Optional[str]): Optional format parameter for the API.
@@ -52,6 +53,7 @@ class TransportCollector(BaseDataCollector):
 			collection_interval=config.default_interval
 		)
 		self.api_url = api_url
+		self.tripupdates_url = tripupdates_url
 		self.primary_key = primary_key
 		self.secondary_key = secondary_key
 		self.format_param = format_param
@@ -89,14 +91,13 @@ class TransportCollector(BaseDataCollector):
 		Returns:
 			dict: Parsed JSON response from the API, or None if the request fails.
 		"""
-		tripupdates_url = "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json"
 		headers = {}
 		if self.primary_key:
 			headers["x-api-key"] = self.primary_key
 		if self.secondary_key:
 			headers["X-Secondary-Key"] = self.secondary_key
 		try:
-			response = requests.get(tripupdates_url, headers=headers, timeout=API_TIMEOUT)
+			response = requests.get(self.tripupdates_url, headers=headers, timeout=API_TIMEOUT)
 			response.raise_for_status()
 			data = response.json()
 			logger.info("TripUpdates API returned status %s", response.status_code)
@@ -170,7 +171,8 @@ class TransportCollector(BaseDataCollector):
 									unit="s"
 								))
 		else:
-			logger.warning("No data received from Vehicle API or failed to parse feed.")
+			keys = list(vehicle_data.keys()) if isinstance(vehicle_data, dict) else type(vehicle_data).__name__
+			logger.warning("No 'entity' key in Vehicle API response. Top-level keys: %s", keys)
 
 		return metrics
 
