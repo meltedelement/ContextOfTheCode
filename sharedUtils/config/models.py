@@ -61,20 +61,6 @@ class LocalCollectorConfig(BaseModel):
         return v
 
 
-class WikipediaCollectorConfig(BaseModel):
-    """Configuration for Wikipedia collector."""
-    collection_interval: int = Field(default=60, description="Collection interval in seconds")
-    collection_window: int = Field(default=60, description="Time window in seconds")
-    user_agent: str = Field(description="User-Agent for API requests")
-
-    @field_validator("collection_interval", "collection_window")
-    @classmethod
-    def validate_intervals(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError("interval must be at least 1 second")
-        return v
-
-
 class UploadQueueConfig(BaseModel):
     """Configuration for upload queue system."""
     implementation: str = Field(default="redis", description="Queue implementation type")
@@ -131,7 +117,6 @@ class AppConfig(BaseModel):
     data_model: DataModelConfig
     collectors: CollectorsConfig
     local_collector: LocalCollectorConfig
-    wikipedia_collector: WikipediaCollectorConfig
     transport_collector: TransportCollectorConfig
     upload_queue: UploadQueueConfig
     aggregator: AggregatorConfig
