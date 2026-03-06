@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for metrics storage."""
 
 import time
-from sqlalchemy import Column, String, Float, Integer, ForeignKey, Index
+from sqlalchemy import Column, String, Float, Double, Integer, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from server.database import Base
 
@@ -50,8 +50,8 @@ class Snapshot(Base):
 
     snapshot_id  = Column(String(36), primary_key=True)
     device_id    = Column(String(36), ForeignKey("devices.device_id"), nullable=False)
-    collected_at = Column(Float,      nullable=False)
-    received_at  = Column(Float,      nullable=False, default=time.time)
+    collected_at = Column(Double,     nullable=False)
+    received_at  = Column(Double,     nullable=False, default=time.time)
 
     device  = relationship("Device", back_populates="snapshots")
     metrics = relationship("Metric", back_populates="snapshot", cascade="all, delete-orphan")
