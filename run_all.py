@@ -29,11 +29,14 @@ try:
 except ImportError:
     requests_lib = None
 
-from collectors.LocalCollector import LocalDataCollector
-from collectors.TransportCollector import TransportCollector
+from collectors.local_collector import LocalDataCollector
+from collectors.transport_collector import TransportCollector
 from sharedUtils.logger.logger import get_logger
 from sharedUtils.upload_queue.manager import stop_upload_queue
-from sharedUtils.config import get_typed_config
+from sharedUtils.config import (
+    get_typed_config,
+    get_local_collector_config,
+)
 
 logger = get_logger(__name__)
 
@@ -104,6 +107,14 @@ def wait_for_flask_healthy(base_url: str) -> bool:
     return False
 
 
+# Collector registry — each entry maps a collector class to the function
+# that returns its typed config.  Adding a new collector means adding one
+# entry here; enable/disable lives in that collector's own config section.
+COLLECTOR_REGISTRY = [
+    (LocalDataCollector, get_local_collector_config),
+]
+
+
 def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict:
     """
     Register this aggregator and its devices with the server.
@@ -117,7 +128,6 @@ def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict
     if requests_lib is None:
         raise RuntimeError("requests package not available — cannot register")
 
-    config = get_typed_config()
     session = requests_lib.Session()
     session.headers.update({"Content-Type": "application/json"})
 
@@ -129,30 +139,36 @@ def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict
 
     # 2. Register each enabled device
     device_ids = {}
-    enabled = config.collectors.enabled_collectors
 
-    source_map = [
-        ("local",     "local-system",  "local"),
-        ("transport", "transport-api", "transport_api"),
-    ]
-
-    for collector_key, device_name, source in source_map:
-        if collector_key not in enabled:
+    for collector_cls, get_config_fn in COLLECTOR_REGISTRY:
+        if not get_config_fn().enabled:
+            logger.info("Collector '%s' is disabled — skipping", collector_cls.__name__)
             continue
 
         resp = session.post(
             f"{base_url}/devices",
             json={
                 "aggregator_id": aggregator_id,
-                "name": device_name,
-                "source": source,
+                "name": collector_cls.DEVICE_NAME,
+                "source": collector_cls.SOURCE,
             },
             timeout=10,
         )
         resp.raise_for_status()
         device_id = resp.json()["device_id"]
-        device_ids[source] = device_id
-        logger.info("Device '%s' (source=%s) registered: %s", device_name, source, device_id)
+        device_ids[collector_cls.SOURCE] = device_id
+        logger.info("Device '%s' (source=%s) registered: %s",
+                     collector_cls.DEVICE_NAME, collector_cls.SOURCE, device_id)
+
+    # Register transport collector (handled separately as it needs env-var API keys)
+    resp = session.post(
+        f"{base_url}/devices",
+        json={"aggregator_id": aggregator_id, "name": "transport-api", "source": "transport_api"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    device_ids["transport_api"] = resp.json()["device_id"]
+    logger.info("Device 'transport-api' (source=transport_api) registered: %s", device_ids["transport_api"])
 
     session.close()
     return device_ids
@@ -171,32 +187,37 @@ def start_collectors(device_ids: dict):
     Returns:
         List of (name, collector) tuples for active collectors
     """
-    config = get_typed_config()
     collectors = []
 
-    if "local" in config.collectors.enabled_collectors:
-        device_id = device_ids.get("local")
-        if not device_id:
-            logger.error("No device_id for local collector — skipping")
-        else:
-            logger.info("Initializing LocalDataCollector (interval=%ds)...", config.local_collector.collection_interval)
-            local_collector = LocalDataCollector(device_id=device_id)
-            collectors.append(("LocalCollector", local_collector))
+    for collector_cls, get_config_fn in COLLECTOR_REGISTRY:
+        config = get_config_fn()
+        if not config.enabled:
+            continue
 
-    if "transport" in config.collectors.enabled_collectors:
-        device_id = device_ids.get("transport_api")
+        device_id = device_ids.get(collector_cls.SOURCE)
         if not device_id:
-            logger.error("No device_id for transport collector — skipping")
-        else:
-            logger.info("Initializing TransportCollector (interval=%ds)...", config.transport_collector.collection_interval)
-            transport_collector = TransportCollector(
-                device_id=device_id,
-                api_url=config.transport_collector.api_url,
-                tripupdates_url=config.transport_collector.tripupdates_url,
-                primary_key=os.environ.get("PRIMARY_KEY"),
-                secondary_key=os.environ.get("SECONDARY_KEY"),
-            )
-            collectors.append(("TransportCollector", transport_collector))
+            logger.error("No device_id for %s — skipping", collector_cls.__name__)
+            continue
+
+        logger.info("Initializing %s (interval=%ds)...",
+                     collector_cls.__name__, config.collection_interval)
+        collector = collector_cls(device_id=device_id)
+        collectors.append((collector_cls.__name__, collector))
+
+    config = get_typed_config()
+    device_id = device_ids.get("transport_api")
+    if not device_id:
+        logger.error("No device_id for transport collector — skipping")
+    else:
+        logger.info("Initializing TransportCollector (interval=%ds)...", config.transport_collector.collection_interval)
+        transport_collector = TransportCollector(
+            device_id=device_id,
+            api_url=config.transport_collector.api_url,
+            tripupdates_url=config.transport_collector.tripupdates_url,
+            primary_key=os.environ.get("PRIMARY_KEY"),
+            secondary_key=os.environ.get("SECONDARY_KEY"),
+        )
+        collectors.append(("TransportCollector", transport_collector))
 
     if not collectors:
         logger.warning("No collectors enabled in config.toml")

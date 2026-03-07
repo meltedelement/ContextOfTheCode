@@ -193,7 +193,6 @@ class RedisUploadQueue:
         self.stop()
         return False
 
-    # ── Public API ─────────────────────────────────────────────────────────────
 
     def put(self, message: 'SnapshotMessage') -> bool:
         """

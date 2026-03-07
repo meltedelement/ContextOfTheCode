@@ -11,11 +11,13 @@ from sharedUtils.config import get_collector_config, get_local_collector_config
 logger = get_logger(__name__)
 BYTES_TO_MB = 1024 * 1024  # Conversion factor from bytes to megabytes
 SENSOR_NAMES = ['coretemp', 'k10temp', 'zenpower']  # CPU temperature sensor names (Intel, AMD)
-SOURCE_TYPE = "local"  # Source identifier for local system collector
 
 
 class LocalDataCollector(BaseDataCollector):
     """Local system data collector that reads real system metrics."""
+
+    SOURCE = "local"
+    DEVICE_NAME = "local-system"
 
     def __init__(self, device_id: str):
         """Initialize local data collector."""
@@ -24,7 +26,7 @@ class LocalDataCollector(BaseDataCollector):
 
         # Initialize base with collection interval
         super().__init__(
-            source=SOURCE_TYPE,
+            source=self.SOURCE,
             device_id=device_id,
             collection_interval=config.collection_interval
         )
