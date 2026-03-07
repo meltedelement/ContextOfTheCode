@@ -2,7 +2,6 @@
 
 from typing import Optional
 import threading
-from sharedUtils.upload_queue.base_queue import UploadQueue
 from sharedUtils.upload_queue.redis_queue import RedisUploadQueue
 from sharedUtils.config import get_upload_queue_config
 from sharedUtils.logger.logger import get_logger
@@ -11,10 +10,10 @@ logger = get_logger(__name__)
 
 # Global queue instance (singleton)
 _lock = threading.Lock()
-_QUEUE_INSTANCE: Optional[UploadQueue] = None
+_QUEUE_INSTANCE: Optional[RedisUploadQueue] = None
 
 
-def get_upload_queue() -> UploadQueue:
+def get_upload_queue() -> RedisUploadQueue:
     """
     Get or create the global upload queue instance (singleton).
 
@@ -22,7 +21,7 @@ def get_upload_queue() -> UploadQueue:
     be created and started even under concurrent access.
 
     Returns:
-        UploadQueue instance configured from config.toml
+        RedisUploadQueue instance configured from config.toml
     """
     global _QUEUE_INSTANCE
 

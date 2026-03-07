@@ -34,8 +34,7 @@ import requests
 import time
 import threading
 import json
-from typing import TYPE_CHECKING, Optional, Dict, Any
-from sharedUtils.upload_queue.base_queue import UploadQueue
+from typing import TYPE_CHECKING, Optional
 from sharedUtils.config.models import UploadQueueConfig
 from sharedUtils.logger.logger import get_logger
 
@@ -48,9 +47,10 @@ REDIS_CONNECT_TIMEOUT = 5    # Seconds to wait when opening a new Redis connecti
 WORKER_STOP_TIMEOUT = 5      # Seconds to wait for the worker thread to shut down cleanly
 RETRY_BATCH_SIZE = 10        # Max retry-queue entries promoted to pending per loop iteration
 BRPOP_TIMEOUT = 1            # Seconds brpop blocks waiting for a new pending message
+ERROR_PREVIEW_LEN = 200      # Max characters of HTTP error response body to log
 
 
-class RedisUploadQueue(UploadQueue):
+class RedisUploadQueue:
     """
     Redis-based upload queue with persistent storage and retry logic.
 
@@ -72,6 +72,8 @@ class RedisUploadQueue(UploadQueue):
     PENDING_QUEUE = "metrics:pending"
     RETRY_QUEUE = "metrics:retry"
     FAILED_QUEUE = "metrics:failed"
+
+    # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     def __init__(self, config: UploadQueueConfig):
         """
@@ -183,6 +185,15 @@ class RedisUploadQueue(UploadQueue):
 
         logger.info("RedisUploadQueue stopped")
 
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, _exc_type, _exc_val, _exc_tb):
+        self.stop()
+        return False
+
+
     def put(self, message: 'SnapshotMessage') -> bool:
         """
         Add a message to the Redis queue (non-blocking).
@@ -222,6 +233,31 @@ class RedisUploadQueue(UploadQueue):
         except Exception as e:
             logger.error("Unexpected error queuing snapshot %s: %s", message.snapshot_id, str(e))
             return False
+
+    def get_stats(self) -> dict[str, int]:
+        """
+        Get current queue statistics.
+
+        Returns:
+            Dictionary with queue sizes:
+            - pending: Number of messages in pending queue
+            - retry: Number of messages in retry queue
+            - failed: Number of messages in failed queue
+        """
+        if not self.redis_client:
+            return {"pending": 0, "retry": 0, "failed": 0}
+
+        try:
+            return {
+                "pending": self.redis_client.llen(self.PENDING_QUEUE),
+                "retry": self.redis_client.zcard(self.RETRY_QUEUE),
+                "failed": self.redis_client.llen(self.FAILED_QUEUE)
+            }
+        except redis.RedisError as e:
+            logger.error("Failed to get queue stats: %s", str(e))
+            return {"pending": 0, "retry": 0, "failed": 0}
+
+    # ── Worker (internal) ──────────────────────────────────────────────────────
 
     def _worker_loop(self) -> None:
         """
@@ -370,6 +406,8 @@ class RedisUploadQueue(UploadQueue):
             logger.error("Unexpected error processing message: %s", str(e))
             return False
 
+    # ── HTTP Upload (internal) ─────────────────────────────────────────────────
+
     def _attempt_upload(self, payload_json: str, message_id: str) -> tuple[bool, Optional[str]]:
         """
         Make a single upload attempt for a message.
@@ -400,7 +438,7 @@ class RedisUploadQueue(UploadQueue):
                 logger.info("Successfully uploaded message %s (HTTP %d)", message_id, response.status_code)
                 return True, None
             else:
-                error = f"HTTP {response.status_code}: {response.text[:200]}"
+                error = f"HTTP {response.status_code}: {response.text[:ERROR_PREVIEW_LEN]}"
                 logger.warning("Upload failed for message %s: %s", message_id, error)
                 return False, error
 
@@ -418,26 +456,3 @@ class RedisUploadQueue(UploadQueue):
             error = f"Unexpected error: {str(e)}"
             logger.error("Unexpected error uploading message %s: %s", message_id, str(e))
             return False, error
-
-    def get_stats(self) -> Dict[str, int]:
-        """
-        Get current queue statistics.
-
-        Returns:
-            Dictionary with queue sizes:
-            - pending: Number of messages in pending queue
-            - retry: Number of messages in retry queue
-            - failed: Number of messages in failed queue
-        """
-        if not self.redis_client:
-            return {"pending": 0, "retry": 0, "failed": 0}
-
-        try:
-            return {
-                "pending": self.redis_client.llen(self.PENDING_QUEUE),
-                "retry": self.redis_client.zcard(self.RETRY_QUEUE),
-                "failed": self.redis_client.llen(self.FAILED_QUEUE)
-            }
-        except redis.RedisError as e:
-            logger.error("Failed to get queue stats: %s", str(e))
-            return {"pending": 0, "retry": 0, "failed": 0}
