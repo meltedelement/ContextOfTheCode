@@ -22,7 +22,7 @@ default_interval = 60
 default_collection_interval = 60
 
 # Enable/disable specific collector types
-enabled_collectors = ["local", "mobile", "third_party", "transport"]
+enabled_collectors = ["local", "transport"]
 
 # CPU sampling interval in seconds for accuracy
 cpu_sample_interval = 1.0
@@ -33,16 +33,6 @@ metric_precision = 1
 [local_collector]
 # How often to collect local system metrics (seconds)
 collection_interval = 10
-
-[wikipedia_collector]
-# How often to collect Wikipedia metrics (seconds)
-collection_interval = 60
-
-# Time window in seconds for collecting edit counts
-collection_window = 60
-
-# User-Agent string for Wikipedia API requests
-user_agent = "WikipediaDataCollector/1.0 (Educational Project)"
 
 [transport_collector]
 # How often to collect transport metrics (seconds)

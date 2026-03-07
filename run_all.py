@@ -4,7 +4,7 @@ System Monitoring Tool - Main Orchestrator
 
 Starts and manages all components:
 - Upload queue worker (auto-started by queue manager)
-- Data collectors (LocalCollector, WikipediaCollector)
+- Data collectors (LocalCollector, TransportCollector)
 
 The Flask API server runs separately on the remote server.
 
@@ -30,7 +30,6 @@ except ImportError:
     requests_lib = None
 
 from collectors.LocalCollector import LocalDataCollector
-from collectors.WikipediaCollector import WikipediaCollector
 from collectors.TransportCollector import TransportCollector
 from sharedUtils.logger.logger import get_logger
 from sharedUtils.upload_queue.manager import stop_upload_queue
@@ -113,7 +112,7 @@ def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict
     2. For each enabled collector, POST /devices → receive device_id UUID
 
     Returns a dict mapping source name to server-issued device_id UUID,
-    e.g. {"local": "uuid-a", "wikipedia": "uuid-b"}.
+    e.g. {"local": "uuid-a", "transport_api": "uuid-b"}.
     """
     if requests_lib is None:
         raise RuntimeError("requests package not available — cannot register")
@@ -133,9 +132,8 @@ def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict
     enabled = config.collectors.enabled_collectors
 
     source_map = [
-        ("local",       "local-system",  "local"),
-        ("third_party", "wikipedia-api", "wikipedia"),
-        ("transport",   "transport-api", "transport_api"),
+        ("local",     "local-system",  "local"),
+        ("transport", "transport-api", "transport_api"),
     ]
 
     for collector_key, device_name, source in source_map:
@@ -184,15 +182,6 @@ def start_collectors(device_ids: dict):
             logger.info("Initializing LocalDataCollector (interval=%ds)...", config.local_collector.collection_interval)
             local_collector = LocalDataCollector(device_id=device_id)
             collectors.append(("LocalCollector", local_collector))
-
-    if "third_party" in config.collectors.enabled_collectors:
-        device_id = device_ids.get("wikipedia")
-        if not device_id:
-            logger.error("No device_id for wikipedia collector — skipping")
-        else:
-            logger.info("Initializing WikipediaCollector (interval=%ds)...", config.wikipedia_collector.collection_interval)
-            wiki_collector = WikipediaCollector(device_id=device_id)
-            collectors.append(("WikipediaCollector", wiki_collector))
 
     if "transport" in config.collectors.enabled_collectors:
         device_id = device_ids.get("transport_api")
