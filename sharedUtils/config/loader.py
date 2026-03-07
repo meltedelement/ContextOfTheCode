@@ -9,7 +9,6 @@ from sharedUtils.config.models import (
     AppConfig,
     CollectorsConfig,
     LocalCollectorConfig,
-    WikipediaCollectorConfig,
     UploadQueueConfig,
     LoggingConfig,
     DataModelConfig,
@@ -91,11 +90,6 @@ def get_collector_config() -> CollectorsConfig:
 def get_local_collector_config() -> LocalCollectorConfig:
     """Get typed local collector configuration section."""
     return get_typed_config().local_collector
-
-
-def get_wikipedia_collector_config() -> WikipediaCollectorConfig:
-    """Get typed Wikipedia collector configuration section."""
-    return get_typed_config().wikipedia_collector
 
 
 def get_upload_queue_config() -> UploadQueueConfig:
