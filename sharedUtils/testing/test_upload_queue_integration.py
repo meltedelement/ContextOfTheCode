@@ -9,7 +9,6 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from collectors.local_collector import LocalDataCollector
-from collectors.wikipedia_collector import WikipediaCollector
 from sharedUtils.upload_queue import get_upload_queue
 from sharedUtils.logger.logger import get_logger
 
@@ -37,22 +36,8 @@ def test_collectors_to_queue():
     print(f"  Device ID: {local_message.device_id}")
     print(f"  Metrics: {len(local_message.metrics)}")
 
-    # Test 2: WikipediaCollector
-    print("\n--- Test 2: WikipediaCollector ---")
-    wiki_collector = WikipediaCollector(
-        device_id="test-wikipedia-001",
-        wikipedia_language="en"
-    )
-    print(f"Created {wiki_collector}")
-
-    print("Generating message from WikipediaCollector...")
-    wiki_message = wiki_collector.generate_message()
-    print(f"  Snapshot ID: {wiki_message.snapshot_id}")
-    print(f"  Device ID: {wiki_message.device_id}")
-    print(f"  Metrics: {len(wiki_message.metrics)}")
-
-    # Test 3: Queue Statistics
-    print("\n--- Test 3: Queue Statistics ---")
+    # Test 2: Queue Statistics
+    print("\n--- Test 2: Queue Statistics ---")
 
     # Wait a moment for messages to be queued
     time.sleep(0.5)
@@ -66,13 +51,12 @@ def test_collectors_to_queue():
     else:
         print("Queue statistics not available for this queue type")
 
-    # Test 4: Multiple messages
-    print("\n--- Test 4: Sending Multiple Messages ---")
-    print("Sending 5 messages from each collector...")
+    # Test 3: Multiple messages
+    print("\n--- Test 3: Sending Multiple Messages ---")
+    print("Sending 5 messages from LocalCollector...")
 
     for i in range(5):
         local_collector.generate_message()
-        wiki_collector.generate_message()
         print(f"  Sent batch {i+1}/5")
         time.sleep(0.2)
 
