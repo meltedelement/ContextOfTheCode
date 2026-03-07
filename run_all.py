@@ -30,7 +30,7 @@ except ImportError:
     requests_lib = None
 
 from collectors.local_collector import LocalDataCollector
-from collectors.TransportCollector import TransportCollector
+from collectors.transport_collector import TransportCollector
 from sharedUtils.logger.logger import get_logger
 from sharedUtils.upload_queue.manager import stop_upload_queue
 from sharedUtils.config import (
