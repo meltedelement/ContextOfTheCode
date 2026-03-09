@@ -50,6 +50,7 @@ WORKER_STOP_TIMEOUT = 5      # Seconds to wait for the worker thread to shut dow
 RETRY_BATCH_SIZE = 10        # Max retry-queue entries promoted to pending per loop iteration
 BRPOP_TIMEOUT = 1            # Seconds brpop blocks waiting for a new pending message
 ERROR_PREVIEW_LEN = 200      # Max characters of HTTP error response body to log
+WORKER_HEARTBEAT_INTERVAL = 60  # Seconds between worker stats log lines
 
 
 def _classify_error(error: str) -> str:
@@ -294,6 +295,9 @@ class RedisUploadQueue:
         """
         logger.info("Worker thread started")
 
+        last_heartbeat = time.time()
+        messages_processed = 0
+
         while self.running:
             try:
                 # Process retry queue first (messages with scheduled retry time)
@@ -301,6 +305,22 @@ class RedisUploadQueue:
 
                 # Process main pending queue
                 processed = self._process_pending_queue()
+                if processed:
+                    messages_processed += 1
+
+                # Periodic heartbeat: log queue stats so the worker is never silent
+                now = time.time()
+                if now - last_heartbeat >= WORKER_HEARTBEAT_INTERVAL:
+                    stats = self.get_stats()
+                    logger.info(
+                        "Worker heartbeat — processed=%d, pending=%d, retry=%d, failed=%d",
+                        messages_processed,
+                        stats["pending"],
+                        stats["retry"],
+                        stats["failed"],
+                    )
+                    messages_processed = 0
+                    last_heartbeat = now
 
                 # Sleep if no work was done
                 if not processed:

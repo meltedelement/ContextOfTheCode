@@ -67,7 +67,8 @@ def check_redis_running() -> bool:
             port=redis_config.redis_port,
             db=redis_config.redis_db,
             password=redis_config.redis_password,
-            socket_connect_timeout=REDIS_CHECK_TIMEOUT_SECONDS
+            socket_connect_timeout=REDIS_CHECK_TIMEOUT_SECONDS,
+            socket_timeout=REDIS_CHECK_TIMEOUT_SECONDS
         )
         client.ping()
         logger.info("✓ Redis is running")
@@ -94,18 +95,39 @@ def wait_for_flask_healthy(base_url: str) -> bool:
 
     health_url = f"{base_url}/health"
     deadline = time.time() + FLASK_HEALTH_TIMEOUT
+    last_error = None
+
+    logger.info("Polling %s (timeout=%ds)...", health_url, FLASK_HEALTH_TIMEOUT)
 
     while time.time() < deadline:
         try:
             resp = requests_lib.get(health_url, timeout=2)
             if resp.status_code == 200:
-                logger.info("✓ Flask API server is healthy")
+                logger.info("Flask API server is healthy")
                 return True
-        except Exception:
-            pass  # Not ready yet
+            # Server responded but not healthy
+            error_msg = f"HTTP {resp.status_code}"
+            if error_msg != last_error:
+                logger.warning("Health check returned %s — retrying", error_msg)
+                last_error = error_msg
+        except requests_lib.exceptions.ConnectionError:
+            error_msg = "connection refused"
+            if error_msg != last_error:
+                logger.warning("Health check failed: %s at %s — retrying", error_msg, health_url)
+                last_error = error_msg
+        except requests_lib.exceptions.Timeout:
+            error_msg = "request timed out"
+            if error_msg != last_error:
+                logger.warning("Health check failed: %s — retrying", error_msg)
+                last_error = error_msg
+        except Exception as e:
+            error_msg = str(e)
+            if error_msg != last_error:
+                logger.warning("Health check failed: %s — retrying", error_msg)
+                last_error = error_msg
         time.sleep(FLASK_HEALTH_POLL_INTERVAL)
 
-    logger.error("✗ Flask did not become healthy within %ds", FLASK_HEALTH_TIMEOUT)
+    logger.error("Flask did not become healthy within %ds (last error: %s)", FLASK_HEALTH_TIMEOUT, last_error)
     return False
 
 
