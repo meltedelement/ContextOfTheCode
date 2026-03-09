@@ -65,7 +65,8 @@ def check_redis_running() -> bool:
             port=redis_config.redis_port,
             db=redis_config.redis_db,
             password=redis_config.redis_password,
-            socket_connect_timeout=REDIS_CHECK_TIMEOUT_SECONDS
+            socket_connect_timeout=REDIS_CHECK_TIMEOUT_SECONDS,
+            socket_timeout=REDIS_CHECK_TIMEOUT_SECONDS
         )
         client.ping()
         logger.info("✓ Redis is running")
