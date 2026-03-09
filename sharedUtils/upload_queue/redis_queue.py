@@ -16,7 +16,9 @@ Message Envelope:
         "retry_count": int,         # number of failed attempts so far
         "first_queued_at": float,   # Unix timestamp when first enqueued
         "last_error": str | None,   # error string from the most recent failure
-        "payload": str              # SnapshotMessage serialised as a JSON string
+        "payload": str,             # SnapshotMessage serialised as a JSON string
+        "failure_class": str | None,  # "transient" or "permanent" (set on failure)
+        "from_failed": bool           # True if recovered from failed queue (set on recovery)
     }
     The envelope is internal to this module — callers interact only with SnapshotMessage.
 
@@ -48,6 +50,26 @@ WORKER_STOP_TIMEOUT = 5      # Seconds to wait for the worker thread to shut dow
 RETRY_BATCH_SIZE = 10        # Max retry-queue entries promoted to pending per loop iteration
 BRPOP_TIMEOUT = 1            # Seconds brpop blocks waiting for a new pending message
 ERROR_PREVIEW_LEN = 200      # Max characters of HTTP error response body to log
+
+
+def _classify_error(error: str) -> str:
+    """Classify an error string from _attempt_upload as "permanent" or "transient".
+
+    Permanent: 4xx HTTP status codes, missing endpoint configuration.
+    Transient: 5xx HTTP status codes, timeouts, connection errors, unexpected errors.
+    """
+    if not error:
+        return "transient"
+    if "No api_endpoint configured" in error:
+        return "permanent"
+    if error.startswith("HTTP "):
+        try:
+            status_code = int(error.split()[1].rstrip(":"))
+            if 400 <= status_code < 500:
+                return "permanent"
+        except (IndexError, ValueError):
+            pass
+    return "transient"
 
 
 class RedisUploadQueue:
@@ -115,6 +137,7 @@ class RedisUploadQueue:
         self.session: Optional[requests.Session] = None
         self.worker_thread: Optional[threading.Thread] = None
         self.running = False
+        self._had_transient_failures = False
 
         if not self.api_endpoint:
             logger.warning("No api_endpoint configured - messages will be queued but not uploaded")
@@ -369,23 +392,45 @@ class RedisUploadQueue:
             success, error = self._attempt_upload(payload_json, message_id)
 
             if success:
+                if self._had_transient_failures:
+                    self._recover_transient_failures()
+                    self._had_transient_failures = False
                 return True
 
-            # Upload failed — update envelope with failure info
+            # Upload failed — classify and update envelope
+            failure_class = _classify_error(error)
             retry_count += 1
             envelope["retry_count"] = retry_count
             envelope["last_error"] = error
+            envelope["failure_class"] = failure_class
 
-            if retry_count >= self.max_retry_attempts:
-                # Retries exhausted — move to failed queue
+            from_failed = envelope.get("from_failed", False)
+
+            if failure_class == "permanent":
+                # Permanent errors skip retry entirely
+                self.redis_client.lpush(self.FAILED_QUEUE, json.dumps(envelope))
+                logger.error(
+                    "Message %s moved to failed queue (permanent error). Error: %s",
+                    message_id, error
+                )
+            elif from_failed:
+                # Recovered message failed again — back to failed permanently
+                self.redis_client.lpush(self.FAILED_QUEUE, json.dumps(envelope))
+                logger.error(
+                    "Recovered message %s failed again — returned to failed queue. Error: %s",
+                    message_id, error
+                )
+            elif retry_count >= self.max_retry_attempts:
+                # Transient, retries exhausted — move to failed queue
+                self._had_transient_failures = True
                 self.redis_client.lpush(self.FAILED_QUEUE, json.dumps(envelope))
                 logger.error(
                     "Message %s moved to failed queue after %d attempts. Last error: %s",
                     message_id, retry_count, error
                 )
             else:
-                # Schedule a deferred retry in the sorted set
-                # score = future Unix timestamp when the message becomes eligible again
+                # Transient, retries remaining — schedule deferred retry
+                self._had_transient_failures = True
                 delay = self.backoff_base * (self.backoff_multiplier ** (retry_count - 1))
                 retry_at = time.time() + delay
                 self.redis_client.zadd(self.RETRY_QUEUE, {json.dumps(envelope): retry_at})
@@ -405,6 +450,52 @@ class RedisUploadQueue:
         except Exception as e:
             logger.error("Unexpected error processing message: %s", str(e))
             return False
+
+    def _recover_transient_failures(self) -> None:
+        """Sweep the failed queue and re-enqueue transient failures for one more attempt.
+
+        Called after a successful upload proves the server is healthy again.
+        Each recovered message gets from_failed=True so it only gets one chance;
+        if it fails again it goes straight back to the failed queue permanently.
+
+        The sweep is bounded by the queue length at the start so messages added
+        during the sweep are not processed.
+        """
+        try:
+            queue_len = self.redis_client.llen(self.FAILED_QUEUE)
+            if queue_len == 0:
+                return
+
+            recovered = 0
+            for _ in range(queue_len):
+                envelope_json = self.redis_client.rpop(self.FAILED_QUEUE)
+                if envelope_json is None:
+                    break  # Queue drained
+
+                try:
+                    envelope = json.loads(envelope_json)
+                except (json.JSONDecodeError, TypeError):
+                    # Unparseable envelope — push back as-is
+                    self.redis_client.lpush(self.FAILED_QUEUE, envelope_json)
+                    continue
+
+                failure_class = envelope.get("failure_class", "permanent")
+                from_failed = envelope.get("from_failed", False)
+
+                if failure_class == "transient" and not from_failed:
+                    envelope["retry_count"] = 0
+                    envelope["from_failed"] = True
+                    self.redis_client.lpush(self.PENDING_QUEUE, json.dumps(envelope))
+                    recovered += 1
+                else:
+                    # Permanent or already-recovered — push back to failed
+                    self.redis_client.lpush(self.FAILED_QUEUE, envelope_json)
+
+            if recovered:
+                logger.info("Recovered %d transient failure(s) from failed queue", recovered)
+
+        except redis.RedisError as e:
+            logger.error("Error recovering transient failures: %s", str(e))
 
     # ── HTTP Upload (internal) ─────────────────────────────────────────────────
 
