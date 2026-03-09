@@ -546,7 +546,7 @@ class RedisUploadQueue:
 
             # Accept any 2xx status code as success (200, 201, 204, etc.)
             if 200 <= response.status_code < 300:
-                logger.info("Successfully uploaded message %s (HTTP %d)", message_id, response.status_code)
+                logger.debug("Successfully uploaded message %s (HTTP %d)", message_id, response.status_code)
                 return True, None
             else:
                 error = f"HTTP {response.status_code}: {response.text[:ERROR_PREVIEW_LEN]}"

@@ -105,7 +105,7 @@ class BaseDataCollector(ABC):
         success = queue.put(message)
 
         if success:
-            logger.info("Queued snapshot %s with %d metrics", message.snapshot_id, len(message.metrics))
+            logger.debug("Queued snapshot %s with %d metrics", message.snapshot_id, len(message.metrics))
         else:
             logger.error("Failed to queue snapshot %s", message.snapshot_id)
 
