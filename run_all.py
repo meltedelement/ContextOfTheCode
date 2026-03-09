@@ -317,11 +317,11 @@ def wait_for_shutdown(collectors):
 
 
 def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully."""
+    """Handle SIGTERM gracefully (sent by systemctl, Docker, etc.)."""
     global running
     _ = signum, frame  # Unused but required by signal.signal
     logger.info("")
-    logger.info("Received shutdown signal. Stopping...")
+    logger.info("Received SIGTERM. Stopping...")
     running = False
 
 
@@ -345,7 +345,6 @@ def main():
     logger.info("=" * 60)
     logger.info("")
 
-    signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
