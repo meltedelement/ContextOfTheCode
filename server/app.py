@@ -8,6 +8,7 @@ import uuid
 from flask import Flask, request, jsonify
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import asc, desc
+from sqlalchemy.orm import joinedload
 
 from server.database import Base, engine, get_db
 from server.models import Aggregator, Device, Snapshot, Metric
@@ -203,12 +204,15 @@ def get_metrics():
 
     try:
         with get_db() as db:
-            query = db.query(Snapshot)
+            query = db.query(Snapshot).options(
+                joinedload(Snapshot.metrics),
+                joinedload(Snapshot.device),
+            )
 
             if device_id:
                 query = query.filter(Snapshot.device_id == device_id)
             if source:
-                query = query.join(Device).filter(Device.source == source)
+                query = query.filter(Snapshot.device.has(Device.source == source))
             if since is not None:
                 query = query.filter(Snapshot.collected_at > since)
 
