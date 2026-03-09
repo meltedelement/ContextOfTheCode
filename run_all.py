@@ -36,6 +36,7 @@ from sharedUtils.upload_queue.manager import stop_upload_queue
 from sharedUtils.config import (
     get_typed_config,
     get_local_collector_config,
+    get_mobile_app_collector_config,
 )
 
 logger = get_logger(__name__)
@@ -170,6 +171,17 @@ def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict
     device_ids["transport_api"] = resp.json()["device_id"]
     logger.info("Device 'transport-api' (source=transport_api) registered: %s", device_ids["transport_api"])
 
+    # Register mobile app collector (only if credentials are present in .env)
+    if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
+        resp = session.post(
+            f"{base_url}/devices",
+            json={"aggregator_id": aggregator_id, "name": "mobile-app", "source": "mobile_app"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        device_ids["mobile_app"] = resp.json()["device_id"]
+        logger.info("Device 'mobile-app' (source=mobile_app) registered: %s", device_ids["mobile_app"])
+
     session.close()
     return device_ids
 
@@ -218,6 +230,23 @@ def start_collectors(device_ids: dict):
             secondary_key=os.environ.get("SECONDARY_KEY"),
         )
         collectors.append(("TransportCollector", transport_collector))
+
+    # Mobile app collector — only started if Supabase credentials are in .env
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_KEY")
+    mobile_device_id = device_ids.get("mobile_app")
+    if supabase_url and supabase_key and mobile_device_id:
+        from collectors.mobile_app_collector import MobileAppCollector
+        mobile_config = get_mobile_app_collector_config()
+        logger.info("Initializing MobileAppCollector (interval=%ds)...", mobile_config.collection_interval)
+        mobile_collector = MobileAppCollector(
+            device_id=mobile_device_id,
+            supabase_url=supabase_url,
+            supabase_key=supabase_key,
+        )
+        collectors.append(("MobileAppCollector", mobile_collector))
+    elif not supabase_url or not supabase_key:
+        logger.info("MobileAppCollector skipped — SUPABASE_URL/SUPABASE_KEY not set in .env")
 
     if not collectors:
         logger.warning("No collectors enabled in config.toml")

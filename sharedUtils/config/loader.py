@@ -9,6 +9,7 @@ from sharedUtils.config.models import (
     AppConfig,
     CollectorsConfig,
     LocalCollectorConfig,
+    MobileAppCollectorConfig,
     UploadQueueConfig,
     LoggingConfig,
     DataModelConfig,
@@ -105,3 +106,8 @@ def get_logging_config() -> LoggingConfig:
 def get_data_model_config() -> DataModelConfig:
     """Get typed data model configuration section."""
     return get_typed_config().data_model
+
+
+def get_mobile_app_collector_config() -> MobileAppCollectorConfig:
+    """Get typed mobile app collector configuration section."""
+    return get_typed_config().mobile_app_collector
