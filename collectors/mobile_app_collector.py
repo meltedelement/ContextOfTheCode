@@ -42,16 +42,17 @@ class MobileAppCollector(BaseDataCollector):
 			supabase_url:  Full URL of the Supabase project.
 			supabase_key:  Supabase anon/service key for authentication.
 		"""
-		# Load interval from [mobile_app_collector] section of config.toml
+		# Load interval and query limit from [mobile_app_collector] section of config.toml
 		config = get_mobile_app_collector_config()
 		super().__init__(
 			source=SOURCE_TYPE,
 			device_id=device_id,
 			collection_interval=config.collection_interval
 		)
+		self._query_limit: int = config.query_limit
 		# Supabase client — reused across every collection cycle
 		self._client: Client = create_client(supabase_url, supabase_key)
-		logger.debug("MobileAppCollector initialized for %s", supabase_url)
+		logger.debug("MobileAppCollector initialized for %s (query_limit=%d)", supabase_url, self._query_limit)
 
 	def _query_device_stats(self) -> Optional[list]:
 		"""
@@ -64,8 +65,8 @@ class MobileAppCollector(BaseDataCollector):
 			List of row dicts, or None if the query fails.
 		"""
 		try:
-			response = self._client.table("device_stats").select("*").execute()
-			logger.debug("Fetched %d rows from device_stats", len(response.data))
+			response = self._client.table("device_stats").select("*").limit(self._query_limit).execute()
+			logger.debug("Fetched %d rows from device_stats (limit=%d)", len(response.data), self._query_limit)
 			return response.data
 		except Exception as e:
 			logger.warning("Failed to query device_stats: %s", e)

@@ -4,7 +4,7 @@ System Monitoring Tool - Main Orchestrator
 
 Starts and manages all components:
 - Upload queue worker (auto-started by queue manager)
-- Data collectors (LocalCollector, TransportCollector)
+- Data collectors (LocalCollector, TransportCollector, MobileAppCollector)
 
 The Flask API server runs separately on the remote server.
 
@@ -30,6 +30,7 @@ except ImportError:
     requests_lib = None
 
 from collectors.local_collector import LocalDataCollector
+from collectors.mobile_app_collector import MobileAppCollector
 from collectors.transport_collector import TransportCollector
 from sharedUtils.logger.logger import get_logger
 from sharedUtils.upload_queue.manager import stop_upload_queue
@@ -231,13 +232,14 @@ def start_collectors(device_ids: dict):
         )
         collectors.append(("TransportCollector", transport_collector))
 
-    # Mobile app collector — only started if Supabase credentials are in .env
+    # Mobile app collector — only started if enabled in config and credentials are in .env
     supabase_url = os.environ.get("SUPABASE_URL")
     supabase_key = os.environ.get("SUPABASE_KEY")
     mobile_device_id = device_ids.get("mobile_app")
-    if supabase_url and supabase_key and mobile_device_id:
-        from collectors.mobile_app_collector import MobileAppCollector
-        mobile_config = get_mobile_app_collector_config()
+    mobile_config = get_mobile_app_collector_config()
+    if not mobile_config.enabled:
+        logger.info("MobileAppCollector disabled in config.toml — skipping")
+    elif supabase_url and supabase_key and mobile_device_id:
         logger.info("Initializing MobileAppCollector (interval=%ds)...", mobile_config.collection_interval)
         mobile_collector = MobileAppCollector(
             device_id=mobile_device_id,
@@ -245,8 +247,8 @@ def start_collectors(device_ids: dict):
             supabase_key=supabase_key,
         )
         collectors.append(("MobileAppCollector", mobile_collector))
-    elif not supabase_url or not supabase_key:
-        logger.info("MobileAppCollector skipped — SUPABASE_URL/SUPABASE_KEY not set in .env")
+    else:
+        logger.info("MobileAppCollector skipped — SUPABASE_URL/SUPABASE_KEY missing")
 
     if not collectors:
         logger.warning("No collectors enabled in config.toml")
