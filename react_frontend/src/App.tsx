@@ -4,7 +4,7 @@ import TransportMap from "./TransportMap";
 
 function App() {
   return (
-    <div style={{ padding: "40px", maxWidth: "700px", margin: "0 auto" }}>
+    <div style={{ padding: "40px", maxWidth: "960px", margin: "0 auto" }}>
       <h1>Context of the Code</h1>
 
       <h2>System</h2>

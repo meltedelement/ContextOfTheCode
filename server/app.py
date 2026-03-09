@@ -206,7 +206,7 @@ def get_metrics():
         with get_db() as db:
             query = db.query(Snapshot).options(
                 joinedload(Snapshot.metrics),
-                joinedload(Snapshot.device),
+                joinedload(Snapshot.device).joinedload(Device.aggregator),
             )
 
             if device_id:
@@ -221,11 +221,14 @@ def get_metrics():
 
             result = [
                 {
-                    "snapshot_id":  s.snapshot_id,
-                    "device_id":    s.device_id,
-                    "source":       s.device.source,
-                    "collected_at": s.collected_at,
-                    "received_at":  s.received_at,
+                    "snapshot_id":     s.snapshot_id,
+                    "device_id":       s.device_id,
+                    "device_name":     s.device.name,
+                    "source":          s.device.source,
+                    "aggregator_id":   s.device.aggregator_id,
+                    "aggregator_name": s.device.aggregator.name,
+                    "collected_at":    s.collected_at,
+                    "received_at":     s.received_at,
                     "metrics": [
                         {
                             "metric_name":  m.metric_name,
