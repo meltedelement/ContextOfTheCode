@@ -106,6 +106,27 @@ class TransportCollectorConfig(BaseModel):
         return v
 
 
+class MobileAppCollectorConfig(BaseModel):
+    """Configuration for mobile app collector."""
+    enabled: bool = Field(default=True, description="Whether this collector is enabled")
+    collection_interval: int = Field(default=60, description="Collection interval in seconds")
+    query_limit: int = Field(default=30, description="Max rows fetched from device_stats per cycle")
+
+    @field_validator("collection_interval")
+    @classmethod
+    def validate_interval(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("collection_interval must be at least 1 second")
+        return v
+
+    @field_validator("query_limit")
+    @classmethod
+    def validate_query_limit(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("query_limit must be at least 1")
+        return v
+
+
 class AggregatorConfig(BaseModel):
     """Configuration for aggregator identity."""
     name: str = Field(description="Human-readable name for this aggregator")
@@ -118,5 +139,6 @@ class AppConfig(BaseModel):
     collectors: CollectorsConfig
     local_collector: LocalCollectorConfig
     transport_collector: TransportCollectorConfig
+    mobile_app_collector: MobileAppCollectorConfig
     upload_queue: UploadQueueConfig
     aggregator: AggregatorConfig

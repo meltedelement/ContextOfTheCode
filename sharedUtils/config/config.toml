@@ -43,6 +43,12 @@ api_url = "https://api.nationaltransport.ie/gtfsr/v2/Vehicles?format=json"
 # Trip updates API endpoint
 tripupdates_url = "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json"
 
+[mobile_app_collector]
+# How often to collect mobile device metrics (seconds)
+collection_interval = 60
+# Max rows fetched from device_stats per cycle — prevents full table scans
+query_limit = 30
+
 [aggregator]
 # Human-readable name for this aggregator (machine running run_all.py)
 name = "SavageLaptop"
