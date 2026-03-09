@@ -26,32 +26,33 @@ interface VehiclePosition {
   delay?: number;
 }
 
-// Generic parser: matches any metric ending in _latitude / _longitude / _last_arrival_delay
-// Works for any vehicle type (bus, car, plane, etc.)
-function parseVehiclePositions(metrics: Metric[]): VehiclePosition[] {
-  const vehicles: Record<string, { id: string; lat?: number; lng?: number; delay?: number }> = {};
+// Each snapshot is one bus. Snapshots are ordered newest-first, so the first
+// occurrence of each vehicle_id is the most recent position.
+function parseVehiclePositions(snapshots: Snapshot[]): VehiclePosition[] {
+  const seen = new Set<string>();
+  const vehicles: VehiclePosition[] = [];
 
-  for (const m of metrics) {
-    const latMatch = m.metric_name.match(/^(.+)_latitude$/);
-    const lngMatch = m.metric_name.match(/^(.+)_longitude$/);
-    const delayMatch = m.metric_name.match(/^(.+)_last_arrival_delay$/);
+  for (const snapshot of snapshots) {
+    const find = (name: string) =>
+      snapshot.metrics.find((m) => m.metric_name === name)?.metric_value;
 
-    if (latMatch) {
-      const id = latMatch[1];
-      vehicles[id] = { ...vehicles[id], id, lat: m.metric_value };
-    } else if (lngMatch) {
-      const id = lngMatch[1];
-      vehicles[id] = { ...vehicles[id], id, lng: m.metric_value };
-    } else if (delayMatch) {
-      const id = delayMatch[1];
-      vehicles[id] = { ...vehicles[id], id, delay: m.metric_value };
-    }
+    const lat = find("latitude");
+    const lng = find("longitude");
+    if (lat === undefined || lng === undefined) continue;
+
+    const vidRaw = find("vehicle_id");
+    const id =
+      vidRaw !== undefined
+        ? String(Math.round(vidRaw))
+        : snapshot.snapshot_id.slice(0, 8);
+
+    if (seen.has(id)) continue;
+    seen.add(id);
+
+    vehicles.push({ id, lat, lng, delay: find("arrival_delay") });
   }
 
-  return Object.values(vehicles).filter(
-    (v): v is VehiclePosition =>
-      v.id !== undefined && v.lat !== undefined && v.lng !== undefined
-  );
+  return vehicles;
 }
 
 interface TransportMapProps {
@@ -80,13 +81,13 @@ export default function TransportMap({
   const fetchPositions = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/api/metrics`, {
-        params: { source, limit: 5 },
+        params: { source, limit: 1500 },
       });
       const snapshots: Snapshot[] = res.data.snapshots;
       if (snapshots.length === 0) return;
-      const latest = snapshots[snapshots.length - 1];
-      setVehicles(parseVehiclePositions(latest.metrics));
-      setLastUpdated(new Date(latest.collected_at * 1000));
+      setVehicles(parseVehiclePositions(snapshots));
+      // snapshots[0] is the most recent (server returns DESC order)
+      setLastUpdated(new Date(snapshots[0].collected_at * 1000));
     } catch (err) {
       console.error("Failed to fetch transport data:", err);
     }
