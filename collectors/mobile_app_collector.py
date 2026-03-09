@@ -65,7 +65,7 @@ class MobileAppCollector(BaseDataCollector):
 		"""
 		try:
 			response = self._client.table("device_stats").select("*").execute()
-			logger.info("Fetched %d rows from device_stats", len(response.data))
+			logger.debug("Fetched %d rows from device_stats", len(response.data))
 			return response.data
 		except Exception as e:
 			logger.warning("Failed to query device_stats: %s", e)
@@ -86,22 +86,29 @@ class MobileAppCollector(BaseDataCollector):
 		rows = self._query_device_stats()
 		metrics: List[MetricEntry] = []
 
-		if not rows:
-			logger.warning("No rows returned from device_stats.")
+		if rows is None:
+			# Query failed — already logged in _query_device_stats
+			return metrics
+
+		if len(rows) == 0:
+			logger.warning("device_stats table returned 0 rows.")
 			return metrics
 
 		for row in rows:
-			# Prefer user_id as the stable device identifier; fall back to id or "unknown"
+			# Prefer user_id; fall back to id or "unknown". Both are UUIDs so safe to use directly in metric names.
 			user_id = row.get("user_id", row.get("id", "unknown"))
 
 			# --- Battery ---
 			battery_level = row.get("battery_level")
 			if battery_level is not None:
-				metrics.append(MetricEntry(
-					metric_name=f"mobile_{user_id}_battery_level",
-					metric_value=float(battery_level),
-					unit="%"
-				))
+				try:
+					metrics.append(MetricEntry(
+						metric_name=f"mobile_{user_id}_battery_level",
+						metric_value=float(battery_level),
+						unit="%"
+					))
+				except (ValueError, TypeError):
+					logger.warning("Skipping battery_level for %s — unexpected value: %r", user_id, battery_level)
 
 			# --- Charging state (bool → float: True=1.0, False=0.0) ---
 			is_charging = row.get("is_charging")
@@ -123,10 +130,13 @@ class MobileAppCollector(BaseDataCollector):
 			]:
 				val = row.get(col)
 				if val is not None:
-					metrics.append(MetricEntry(
-						metric_name=f"mobile_{user_id}_{col}",
-						metric_value=float(val),
-						unit=unit
-					))
+					try:
+						metrics.append(MetricEntry(
+							metric_name=f"mobile_{user_id}_{col}",
+							metric_value=float(val),
+							unit=unit
+						))
+					except (ValueError, TypeError):
+						logger.warning("Skipping %s for %s — unexpected value: %r", col, user_id, val)
 
 		return metrics
