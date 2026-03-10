@@ -36,29 +36,22 @@ function buildVehicleTracks(snapshots: Snapshot[]): VehicleTrack[] {
   const tracks: Record<string, VehicleTrack> = {};
 
   for (const snap of snapshots) {
-    const seen: Record<string, { lat?: number; lng?: number; delay?: number }> = {};
+    const find = (name: string) => snap.metrics.find((m) => m.metric_name === name)?.metric_value;
 
-    for (const m of snap.metrics) {
-      const latMatch   = m.metric_name.match(/^(.+)_latitude$/);
-      const lngMatch   = m.metric_name.match(/^(.+)_longitude$/);
-      const delayMatch = m.metric_name.match(/^(.+)_last_arrival_delay$/);
+    const lat = find("latitude");
+    const lng = find("longitude");
+    if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) continue;
 
-      if (latMatch)        seen[latMatch[1]]   = { ...seen[latMatch[1]],   lat:   m.metric_value };
-      else if (lngMatch)   seen[lngMatch[1]]   = { ...seen[lngMatch[1]],   lng:   m.metric_value };
-      else if (delayMatch) seen[delayMatch[1]] = { ...seen[delayMatch[1]], delay: m.metric_value };
-    }
+    const vidRaw = find("vehicle_id");
+    const id = vidRaw !== undefined ? String(Math.round(vidRaw)) : snap.snapshot_id.slice(0, 8);
 
-    for (const [id, pos] of Object.entries(seen)) {
-      if (pos.lat !== undefined && pos.lng !== undefined && !(pos.lat === 0 && pos.lng === 0)) {
-        if (!tracks[id]) tracks[id] = { id, positions: [] };
-        tracks[id].positions.push({
-          lat: pos.lat,
-          lng: pos.lng,
-          timestamp: snap.collected_at,
-          delay: pos.delay,
-        });
-      }
-    }
+    if (!tracks[id]) tracks[id] = { id, positions: [] };
+    tracks[id].positions.push({
+      lat,
+      lng,
+      timestamp: snap.collected_at,
+      delay: find("arrival_delay"),
+    });
   }
 
   return Object.values(tracks);
