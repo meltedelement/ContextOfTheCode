@@ -16,6 +16,7 @@ import sys
 import time
 import signal
 import os
+import subprocess
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
@@ -80,7 +81,10 @@ def start_command_server(port: int):
         def log_message(self, format, *args):  # noqa: A002
             pass  # suppress default HTTP request logging
 
-    server = HTTPServer(("0.0.0.0", port), CommandHandler)
+    class _Server(HTTPServer):
+        allow_reuse_address = True
+
+    server = _Server(("0.0.0.0", port), CommandHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     logger.info("Command server listening on port %d (POST /restart to restart)", port)
@@ -386,7 +390,11 @@ def main():
     try:
         # Step 0: Start command server (restart endpoint over Tailscale)
         config = get_typed_config()
-        start_command_server(config.aggregator.command_port)
+        try:
+            start_command_server(config.aggregator.command_port)
+        except OSError as e:
+            logger.warning("Command server could not start on port %d: %s — restart endpoint unavailable",
+                           config.aggregator.command_port, e)
 
         # Step 1: Check Redis
         if not check_redis_running():
@@ -434,7 +442,8 @@ def main():
 
     if restart_requested:
         logger.info("Restarting process...")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        subprocess.Popen([sys.executable] + sys.argv)
+        sys.exit(0)
 
     return 0
 

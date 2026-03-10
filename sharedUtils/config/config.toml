@@ -53,7 +53,7 @@ query_limit = 30
 # Human-readable name for this aggregator (machine running run_all.py)
 name = "SavageLaptop"
 # Port for the restart command HTTP server (accessible over Tailscale)
-command_port = 5001
+command_port = 5050
 
 [upload_queue]
 # Redis-based persistent upload queue
