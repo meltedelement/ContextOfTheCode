@@ -23,6 +23,7 @@ interface Metric {
 interface Snapshot {
   snapshot_id:     string;
   device_id:       string;
+  vehicle_id:      string | null;
   device_name:     string;
   source:          string;
   aggregator_id:   string;
@@ -47,8 +48,7 @@ function buildVehicleTracks(snapshots: Snapshot[]): VehicleTrack[] {
     const lng = find("longitude");
     if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) continue;
 
-    const vidRaw = find("vehicle_id");
-    const id = vidRaw !== undefined ? String(Math.round(vidRaw)) : snap.snapshot_id.slice(0, 8);
+    const id = snap.vehicle_id ?? snap.snapshot_id.slice(0, 8);
 
     if (!tracks[id]) tracks[id] = { id, positions: [] };
     tracks[id].positions.push({

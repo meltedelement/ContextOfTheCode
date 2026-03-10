@@ -159,15 +159,6 @@ class TransportCollector(BaseDataCollector):
 						unit="deg"
 					))
 
-					try:
-						metrics.append(MetricEntry(
-							metric_name=f"{vehicle_id}__vehicle_id",
-							metric_value=float(vehicle_id),
-							unit=""
-						))
-					except (ValueError, TypeError):
-						logger.warning("Non-numeric vehicle_id %r — skipping vehicle_id metric", vehicle_id)
-
 					trip_update = trip_update_lookup.get((trip_id, vehicle_id))
 					if trip_update and "stop_time_update" in trip_update:
 						stop_updates = trip_update["stop_time_update"]
@@ -209,9 +200,10 @@ class TransportCollector(BaseDataCollector):
 			))
 
 		last_snapshot: Optional[SnapshotMessage] = None
-		for vehicle_metrics in groups.values():
+		for vehicle_key, vehicle_metrics in groups.items():
 			snapshot = SnapshotMessage(
 				device_id=self.device_id,
+				vehicle_id=vehicle_key,
 				metrics=vehicle_metrics,
 			)
 			self.export_to_data_model(snapshot)
