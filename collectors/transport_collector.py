@@ -7,8 +7,9 @@ framework's message and queue system. The collector is designed to be easily ext
 different API response formats and authentication schemes.
 """
 
-from collectors.base_data_collector import BaseDataCollector, MetricEntry
+from collectors.base_data_collector import BaseDataCollector, MetricEntry, SnapshotMessage
 from typing import Optional, List
+from collections import defaultdict
 import requests
 import sys
 import time
@@ -148,15 +149,24 @@ class TransportCollector(BaseDataCollector):
 						continue
 
 					metrics.append(MetricEntry(
-						metric_name=f"bus_{vehicle_id}_latitude",
+						metric_name=f"{vehicle_id}__latitude",
 						metric_value=float(lat),
 						unit="deg"
 					))
 					metrics.append(MetricEntry(
-						metric_name=f"bus_{vehicle_id}_longitude",
+						metric_name=f"{vehicle_id}__longitude",
 						metric_value=float(lon),
 						unit="deg"
 					))
+
+					try:
+						metrics.append(MetricEntry(
+							metric_name=f"{vehicle_id}__vehicle_id",
+							metric_value=float(vehicle_id),
+							unit=""
+						))
+					except (ValueError, TypeError):
+						logger.warning("Non-numeric vehicle_id %r — skipping vehicle_id metric", vehicle_id)
 
 					trip_update = trip_update_lookup.get((trip_id, vehicle_id))
 					if trip_update and "stop_time_update" in trip_update:
@@ -166,7 +176,7 @@ class TransportCollector(BaseDataCollector):
 							arrival_delay = last_stop.get("arrival", {}).get("delay")
 							if arrival_delay is not None:
 								metrics.append(MetricEntry(
-									metric_name=f"bus_{vehicle_id}_last_arrival_delay",
+									metric_name=f"{vehicle_id}__arrival_delay",
 									metric_value=float(arrival_delay),
 									unit="s"
 								))
@@ -176,17 +186,60 @@ class TransportCollector(BaseDataCollector):
 
 		return metrics
 
+	def generate_message(self) -> SnapshotMessage:
+		"""
+		Override generate_message() to emit one SnapshotMessage per bus.
+
+		Groups the flat metric list from collect_data() by vehicle prefix,
+		queues one snapshot per bus via export_to_data_model(), and returns
+		the last snapshot to satisfy the base class _collection_loop() contract.
+		"""
+		metrics = self.collect_data()
+
+		if not metrics:
+			return super().generate_message()
+
+		groups: dict = defaultdict(list)
+		for entry in metrics:
+			vehicle_key, _, clean_name = entry.metric_name.partition("__")
+			groups[vehicle_key].append(MetricEntry(
+				metric_name=clean_name,
+				metric_value=entry.metric_value,
+				unit=entry.unit,
+			))
+
+		last_snapshot: Optional[SnapshotMessage] = None
+		for vehicle_metrics in groups.values():
+			snapshot = SnapshotMessage(
+				device_id=self.device_id,
+				metrics=vehicle_metrics,
+			)
+			self.export_to_data_model(snapshot)
+			last_snapshot = snapshot
+
+		total_metrics = sum(len(v) for v in groups.values())
+		avg_metrics = total_metrics / len(groups) if groups else 0
+		logger.info(
+			"Queued %d bus snapshots (%.1f metrics each on average)",
+			len(groups), avg_metrics
+		)
+		self._last_bus_count = len(groups)
+
+		return last_snapshot
+
 
 if __name__ == "__main__":
 	load_dotenv()
 
 	api_url = sys.argv[1] if len(sys.argv) > 1 else "https://api.nationaltransport.ie/gtfsr/v2/Vehicles?format=json"
-	format_param = sys.argv[2] if len(sys.argv) > 2 else None
+	tripupdates_url = sys.argv[2] if len(sys.argv) > 2 else "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json"
+	format_param = None
 	primary_key = os.environ.get("PRIMARY_KEY")
 	secondary_key = os.environ.get("SECONDARY_KEY")
 	collector = TransportCollector(
 		device_id="transport-001",
 		api_url=api_url,
+		tripupdates_url=tripupdates_url,
 		primary_key=primary_key,
 		secondary_key=secondary_key,
 		format_param=format_param
@@ -196,11 +249,13 @@ if __name__ == "__main__":
 	print("Press Ctrl+C to stop\n")
 
 	try:
+		import json
 		poll_interval = get_collector_config().default_interval
 		while True:
 			message = collector.generate_message()
-			print("--- Metrics Extracted ---")
-			import json
+			bus_count = getattr(collector, "_last_bus_count", "?")
+			print(f"--- generate_message() queued {bus_count} bus snapshots ---")
+			print(f"    Last bus: {len(message.metrics)} metrics")
 			print(json.dumps([m.dict() for m in message.metrics], indent=2))
 			print("--- End of Metrics ---")
 			time.sleep(poll_interval)

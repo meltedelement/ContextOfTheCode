@@ -78,3 +78,4 @@ timeout = 10                  # HTTP request timeout in seconds
 
 # Worker settings
 worker_sleep = 1              # Sleep time in seconds when queue is empty
+batch_size = 50               # Snapshots per batch POST to /api/metrics/batch

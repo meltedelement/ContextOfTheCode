@@ -1,7 +1,6 @@
 """Configuration module."""
 
 from sharedUtils.config.loader import (
-    get_config,
     get_typed_config,
     get_collector_config,
     get_local_collector_config,
@@ -21,7 +20,6 @@ from sharedUtils.config.models import (
 )
 
 __all__ = [
-    'get_config',
     'get_typed_config',
     'get_collector_config',
     'get_local_collector_config',

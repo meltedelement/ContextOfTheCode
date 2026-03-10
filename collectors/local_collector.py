@@ -30,20 +30,38 @@ class LocalDataCollector(BaseDataCollector):
             device_id=device_id,
             collection_interval=config.collection_interval
         )
+        logger.info("LocalDataCollector initialized (device_id=%s, interval=%ds)",
+                     device_id, config.collection_interval)
 
     def _get_cpu_temperature(self) -> Optional[float]:
         """Get CPU temperature in Celsius, or None if unavailable."""
         precision = get_collector_config().metric_precision
 
-        if hasattr(psutil, "sensors_temperatures"):
+        if not hasattr(psutil, "sensors_temperatures"):
+            logger.debug("sensors_temperatures not available on this platform")
+            return None
+
+        try:
             temps = psutil.sensors_temperatures()
-            if temps:
-                for sensor_name in SENSOR_NAMES:
-                    if sensor_name in temps and temps[sensor_name]:
-                        return round(temps[sensor_name][0].current, precision)
-                first_sensor = next(iter(temps.values()))
-                if first_sensor:
-                    return round(first_sensor[0].current, precision)
+        except Exception as e:
+            logger.warning("Failed to read temperature sensors: %s", e)
+            return None
+
+        if not temps:
+            logger.debug("No temperature sensors found")
+            return None
+
+        for sensor_name in SENSOR_NAMES:
+            if sensor_name in temps and temps[sensor_name]:
+                logger.debug("Using temperature sensor: %s", sensor_name)
+                return round(temps[sensor_name][0].current, precision)
+
+        first_key = next(iter(temps))
+        first_sensor = temps[first_key]
+        if first_sensor:
+            logger.debug("Using fallback temperature sensor: %s", first_key)
+            return round(first_sensor[0].current, precision)
+
         return None
 
     def collect_data(self) -> List[MetricEntry]:
@@ -52,8 +70,20 @@ class LocalDataCollector(BaseDataCollector):
         precision = config.metric_precision
         cpu_interval = config.cpu_sample_interval
 
-        memory = psutil.virtual_memory()
-        cpu_percent = psutil.cpu_percent(interval=cpu_interval)
+        logger.debug("Collecting system metrics (cpu_sample_interval=%.1fs)...", cpu_interval)
+
+        try:
+            memory = psutil.virtual_memory()
+        except Exception as e:
+            logger.error("Failed to read memory stats: %s", e)
+            raise
+
+        try:
+            cpu_percent = psutil.cpu_percent(interval=cpu_interval)
+        except Exception as e:
+            logger.error("Failed to read CPU usage: %s", e)
+            raise
+
         cpu_temp = self._get_cpu_temperature()
 
         metrics = [
@@ -64,6 +94,10 @@ class LocalDataCollector(BaseDataCollector):
 
         if cpu_temp is not None:
             metrics.append(MetricEntry(metric_name="cpu_temp_celsius", metric_value=cpu_temp, unit="°C"))
+
+        logger.debug("Collected %d metrics: RAM=%.1f%%, CPU=%.1f%%%s",
+                     len(metrics), memory.percent, cpu_percent,
+                     f", Temp={cpu_temp}°C" if cpu_temp is not None else "")
 
         return metrics
 

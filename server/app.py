@@ -180,6 +180,68 @@ def post_metrics():
         return jsonify({"error": "Failed to store metrics"}), 500
 
 
+@app.route('/api/metrics/batch', methods=['POST'])
+def post_metrics_batch():
+    """
+    Receive a batch of snapshots in a single request and persist all in one transaction.
+
+    Expects a JSON array of SnapshotMessage objects (same schema as POST /api/metrics).
+    Items with unknown device_ids or missing fields are skipped; the rest are stored.
+    """
+    data = request.get_json()
+
+    if not isinstance(data, list):
+        logger.warning("POST /api/metrics/batch: body is not a JSON array")
+        return jsonify({"error": "Expected a JSON array of snapshots"}), 400
+
+    if not data:
+        return jsonify({"status": "success", "snapshots_received": 0}), 200
+
+    try:
+        with get_db() as db:
+            stored = 0
+            for item in data:
+                snapshot_id = item.get("snapshot_id")
+                device_id   = item.get("device_id")
+                timestamp   = item.get("timestamp")
+                metrics     = item.get("metrics", [])
+
+                if not all([snapshot_id, device_id, timestamp is not None]):
+                    logger.warning("POST /api/metrics/batch: skipping malformed item (missing fields)")
+                    continue
+
+                device = db.query(Device).filter_by(device_id=device_id).first()
+                if not device:
+                    logger.warning("POST /api/metrics/batch: unknown device_id=%s", device_id)
+                    continue
+
+                snapshot = Snapshot(
+                    snapshot_id=snapshot_id,
+                    device_id=device_id,
+                    collected_at=timestamp,
+                    received_at=time.time(),
+                )
+                db.add(snapshot)
+                db.flush()
+
+                for entry in metrics:
+                    db.add(Metric(
+                        snapshot_id=snapshot_id,
+                        metric_name=entry.get("metric_name", ""),
+                        metric_value=float(entry.get("metric_value", 0.0)),
+                        unit=entry.get("unit", ""),
+                    ))
+
+                stored += 1
+
+        logger.info("POST /api/metrics/batch: stored %d/%d snapshots", stored, len(data))
+        return jsonify({"status": "success", "snapshots_received": stored}), 201
+
+    except Exception as e:
+        logger.error("POST /api/metrics/batch: database error: %s", str(e))
+        return jsonify({"error": "Failed to store metrics"}), 500
+
+
 @app.route('/api/metrics', methods=['GET'])
 def get_metrics():
     """
