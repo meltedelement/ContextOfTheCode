@@ -60,28 +60,31 @@ function MetricChart({ values, labels, color }: {
   color:  string;
 }) {
   return (
-    <Line
-      data={{
-        labels,
-        datasets: [{
-          data:            values,
-          borderColor:     color,
-          backgroundColor: color + COLOR_OPACITY_FILL,
-          fill:            false,
-          tension:         CHART.LINE_TENSION,
-          pointRadius:     CHART.POINT_RADIUS,
-        }],
-      }}
-      options={{
-        responsive:  true,
-        animation:   false,
-        plugins:     { legend: { display: false } },
-        scales: {
-          x: { ticks: { maxTicksLimit: CHART.MAX_X_TICKS, font: { size: CHART.TICK_SIZE } } },
-          y: { ticks: { font: { size: CHART.TICK_SIZE } } },
-        },
-      }}
-    />
+    <div style={{ height: "140px" }}>
+      <Line
+        data={{
+          labels,
+          datasets: [{
+            data:            values,
+            borderColor:     color,
+            backgroundColor: color + COLOR_OPACITY_FILL,
+            fill:            false,
+            tension:         CHART.LINE_TENSION,
+            pointRadius:     CHART.POINT_RADIUS,
+          }],
+        }}
+        options={{
+          responsive:          true,
+          maintainAspectRatio: false,
+          animation:           false,
+          plugins:             { legend: { display: false } },
+          scales: {
+            x: { ticks: { maxTicksLimit: CHART.MAX_X_TICKS, font: { size: CHART.TICK_SIZE } } },
+            y: { ticks: { font: { size: CHART.TICK_SIZE } } },
+          },
+        }}
+      />
+    </div>
   );
 }
 
@@ -94,7 +97,7 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
   const metricNames = useMemo(() => {
     const seen = new Set<string>();
     snaps.forEach((s) => s.metrics.forEach((m) => seen.add(m.metric_name)));
-    return Array.from(seen);
+    return Array.from(seen).sort();
   }, [snaps]);
 
   return (
@@ -197,7 +200,7 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
         </div>
 
         {/* Historical charts */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
           {metricNames.map((name, i) => {
             const values: number[] = [];
             const labels: string[] = [];
@@ -257,7 +260,9 @@ export default function MetricsSection({ source, limit = 50, pollInterval = 5000
       if (!groups[snap.device_id]) groups[snap.device_id] = [];
       groups[snap.device_id].push(snap);
     }
-    return Object.values(groups);
+    return Object.values(groups).sort((a, b) =>
+      (a[0].device_name || "").localeCompare(b[0].device_name || "")
+    );
   }, [snapshots]);
 
   if (deviceGroups.length === 0) {

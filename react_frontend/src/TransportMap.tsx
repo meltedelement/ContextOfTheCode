@@ -9,6 +9,11 @@ const MS_PER_SEC = 1000;
 
 const MAP_HEIGHT = "500px";
 
+// Tracks whose most recent position is older than this (relative to the current
+// live max) are considered stale and hidden in live mode. Set to 3× the
+// collection interval to tolerate a missed cycle without ghosting old buses.
+const LIVE_STALE_SECS = 180;
+
 interface Metric {
   metric_name: string;
   metric_value: number;
@@ -100,6 +105,7 @@ export default function TransportMap({
       const res = await axios.get(`${API_BASE}/api/metrics`, { params: { source, limit } });
       const snapshots: Snapshot[] = res.data.snapshots;
       if (snapshots.length === 0) return;
+      if (snapshots.length >= limit) console.warn(`Transport snapshot limit reached (${snapshots.length}/${limit}) — oldest history may be truncated.`);
 
       const timestamps = snapshots.map((s) => s.collected_at);
       const min = Math.min(...timestamps);
@@ -131,11 +137,16 @@ export default function TransportMap({
   const displayedVehicles = useMemo(() => {
     if (!timeRange) return [];
     return tracks
+      .filter((t) => {
+        if (!isLive) return true;
+        const latestPos = t.positions[t.positions.length - 1];
+        return latestPos && (selectedTime - latestPos.timestamp) <= LIVE_STALE_SECS;
+      })
       .map((t) => ({ id: t.id, pos: positionAtTime(t, selectedTime) }))
       .filter((v): v is { id: string; pos: NonNullable<ReturnType<typeof positionAtTime>> } =>
         v.pos !== null
       );
-  }, [tracks, selectedTime, timeRange]);
+  }, [tracks, selectedTime, timeRange, isLive]);
 
   if (loadError) return <p style={{ color: "red" }}>Failed to load Google Maps.</p>;
   if (!isLoaded) return <p>Loading map...</p>;

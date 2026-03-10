@@ -1,11 +1,12 @@
 # React Frontend Configuration
 
 [system]
-source = "local"
-limit  = 50
+source          = "local"
+snapshot_limit  = 5000
 
 [transport]
-source = "transport_api"
+source         = "transport_api"
+snapshot_limit = 3000
 
 [transport.map]
 centre_lat = 53.3498
