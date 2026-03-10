@@ -94,10 +94,13 @@ export default function TransportMap({
   const [tracks, setTracks]               = useState<VehicleTrack[]>([]);
   const [latestSnap, setLatestSnap]       = useState<Snapshot | null>(null);
   const [timeRange, setTimeRange]         = useState<{ min: number; max: number } | null>(null);
-  const [selectedTime, setSelectedTime]   = useState<number>(0);
+  const [collectionTimes, setCollectionTimes] = useState<number[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [isLive, setIsLive]               = useState(true);
   const [selectedId, setSelectedId]       = useState<string | null>(null);
   const [snapshotCount, setSnapshotCount] = useState<number>(0);
+
+  const selectedTime = collectionTimes[selectedIndex] ?? 0;
 
   const isLiveRef = useRef(true);
 
@@ -114,12 +117,14 @@ export default function TransportMap({
       const timestamps = snapshots.map((s) => s.collected_at);
       const min = Math.min(...timestamps);
       const max = Math.max(...timestamps);
+      const times = Array.from(new Set(timestamps)).sort((a, b) => a - b);
 
       setSnapshotCount(snapshots.length);
       setTracks(buildVehicleTracks(snapshots));
       setLatestSnap(snapshots[snapshots.length - 1]);
       setTimeRange({ min, max });
-      if (isLiveRef.current) setSelectedTime(max);
+      setCollectionTimes(times);
+      if (isLiveRef.current) setSelectedIndex(times.length - 1);
     } catch (err) {
       console.error("Failed to fetch transport data:", err);
     }
@@ -132,9 +137,9 @@ export default function TransportMap({
   }, [fetchPositions, pollInterval]);
 
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const t = Number(e.target.value);
-    setSelectedTime(t);
-    const live = timeRange !== null && t === timeRange.max;
+    const i = Number(e.target.value);
+    setSelectedIndex(i);
+    const live = i === collectionTimes.length - 1;
     setIsLive(live);
     isLiveRef.current = live;
   };
@@ -232,7 +237,7 @@ export default function TransportMap({
               {!isLive && (
                 <button
                   onClick={() => {
-                    setSelectedTime(timeRange.max);
+                    setSelectedIndex(collectionTimes.length - 1);
                     setIsLive(true);
                     isLiveRef.current = true;
                   }}
@@ -248,9 +253,9 @@ export default function TransportMap({
           </div>
           <input
             type="range"
-            min={timeRange.min}
-            max={timeRange.max}
-            value={selectedTime}
+            min={0}
+            max={collectionTimes.length - 1}
+            value={selectedIndex}
             step={1}
             onChange={handleSliderChange}
             style={{ width: "100%" }}
