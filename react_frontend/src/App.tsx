@@ -2,11 +2,8 @@ import React, { useEffect, useState } from "react";
 import { parse } from "smol-toml";
 import MetricsSection from "./MetricsSection";
 import TransportMap from "./TransportMap";
-
-interface FrontendConfig {
-  system: { source: string; snapshot_limit: number };
-  transport: { source: string; snapshot_limit: number; map: { centre_lat: number; centre_lng: number; zoom: number } };
-}
+import MobileSection from "./MobileSection";
+import { ConfigContext, FrontendConfig } from "./ConfigContext";
 
 export default function App() {
   const [config, setConfig] = useState<FrontendConfig | null>(null);
@@ -21,19 +18,29 @@ export default function App() {
   if (!config) return null;
 
   return (
-    <div style={{ padding: "40px", maxWidth: "960px", margin: "0 auto" }}>
-      <h1>Context of the Code</h1>
+    <ConfigContext.Provider value={config}>
+      <div style={{ padding: "40px", maxWidth: "960px", margin: "0 auto" }}>
+        <h1>Context of the Code</h1>
 
-      <h2>System</h2>
-      <MetricsSection source={config.system.source} limit={config.system.snapshot_limit} />
+        <h2>System</h2>
+        <MetricsSection source={config.system.source} limit={config.system.snapshot_limit} />
 
-      <h2 style={{ marginTop: "40px" }}>Transport</h2>
-      <TransportMap
-        source={config.transport.source}
-        limit={config.transport.snapshot_limit}
-        defaultCenter={{ lat: config.transport.map.centre_lat, lng: config.transport.map.centre_lng }}
-        defaultZoom={config.transport.map.zoom}
-      />
-    </div>
+        <h2 style={{ marginTop: "40px" }}>Transport</h2>
+        <TransportMap
+          source={config.transport.source}
+          limit={config.transport.snapshot_limit}
+          defaultCenter={{ lat: config.transport.map.centre_lat, lng: config.transport.map.centre_lng }}
+          defaultZoom={config.transport.map.zoom}
+        />
+
+        <h2 style={{ marginTop: "40px" }}>Mobile Devices</h2>
+        <MobileSection
+          source={config.mobile_app.source}
+          limit={config.mobile_app.snapshot_limit}
+          pollInterval={config.mobile_app.poll_interval}
+          stalenessSecs={config.mobile_app.staleness_secs}
+        />
+      </div>
+    </ConfigContext.Provider>
   );
 }

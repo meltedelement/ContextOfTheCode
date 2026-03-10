@@ -1,11 +1,8 @@
-import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import React, { useContext, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from "@react-google-maps/api";
 import axios from "axios";
+import { ConfigContext } from "./ConfigContext";
 
-const API_BASE = "";
-
-// Unix timestamps from the server are in seconds; JS Date needs milliseconds.
-const MS_PER_SEC = 1000;
 
 const MAP_HEIGHT = "500px";
 
@@ -108,9 +105,11 @@ export default function TransportMap({
     googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY ?? "",
   });
 
+  const { ui } = useContext(ConfigContext)!;
+
   const fetchPositions = useCallback(async () => {
     try {
-      const res = await axios.get(`${API_BASE}/api/metrics`, { params: { source, limit } });
+      const res = await axios.get(`${ui.api_base}/api/metrics`, { params: { source, limit } });
       const snapshots: Snapshot[] = res.data.snapshots;
       if (snapshots.length === 0) return;
 
@@ -145,7 +144,7 @@ export default function TransportMap({
     } catch (err) {
       console.error("Failed to fetch transport data:", err);
     }
-  }, [source, limit]);
+  }, [source, limit, ui.api_base]);
 
   useEffect(() => {
     fetchPositions();
@@ -184,8 +183,8 @@ export default function TransportMap({
     ?? snapshots[snapshots.length - 1];
 
   const selected = displayedVehicles.find((v) => v.id === selectedId);
-  const latencyMs = Math.round((selectedSnap.received_at - selectedSnap.collected_at) * MS_PER_SEC);
-  const isDataFresh = (Date.now() / MS_PER_SEC - timeRange.max) <= LIVE_FRESHNESS_SECS;
+  const latencyMs = Math.round((selectedSnap.received_at - selectedSnap.collected_at) * ui.ms_per_sec);
+  const isDataFresh = (Date.now() / ui.ms_per_sec - timeRange.max) <= LIVE_FRESHNESS_SECS;
 
   return (
     <div style={{ border: "1px solid #e0e0e0", borderRadius: "10px", marginBottom: "40px", overflow: "hidden" }}>
@@ -233,8 +232,8 @@ export default function TransportMap({
             ["Device ID",        selectedSnap.device_id,       true],
             ["Aggregator ID",    selectedSnap.aggregator_id,   true],
             ["Snapshot ID",      selectedSnap.snapshot_id,     true],
-            ["Collected at",     new Date(selectedSnap.collected_at * MS_PER_SEC).toLocaleString()],
-            ["Received at",      new Date(selectedSnap.received_at  * MS_PER_SEC).toLocaleString()],
+            ["Collected at",     new Date(selectedSnap.collected_at * ui.ms_per_sec).toLocaleString()],
+            ["Received at",      new Date(selectedSnap.received_at  * ui.ms_per_sec).toLocaleString()],
             ["Latency",          `${latencyMs} ms`],
             ["Snapshots loaded", String(snapshotCount)],
             ["Vehicles tracked", String(displayedVehicles.length)],
@@ -252,7 +251,7 @@ export default function TransportMap({
         <div style={{ marginBottom: "12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
             <span style={{ fontSize: "13px", color: "#333" }}>
-              {new Date(selectedTime * MS_PER_SEC).toLocaleString()}
+              {new Date(selectedTime * ui.ms_per_sec).toLocaleString()}
               <span style={{ fontSize: "11px", color: "#aaa", marginLeft: "8px" }}>
                 interval {selectedIndex + 1} / {collectionTimes.length}
               </span>
@@ -285,8 +284,8 @@ export default function TransportMap({
             style={{ width: "100%" }}
           />
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#aaa", marginTop: "2px" }}>
-            <span>{new Date(timeRange.min * MS_PER_SEC).toLocaleString()}</span>
-            <span>{new Date(timeRange.max * MS_PER_SEC).toLocaleString()}</span>
+            <span>{new Date(timeRange.min * ui.ms_per_sec).toLocaleString()}</span>
+            <span>{new Date(timeRange.max * ui.ms_per_sec).toLocaleString()}</span>
           </div>
         </div>
 
