@@ -378,13 +378,10 @@ export default function TransportMap({
    *
    * Strategy:
    *   1. Find lastRawIdx — the last raw input point whose timestamp ≤ selectedTime
-   *   2. Walk the snapped array forward:
-   *      - Include snapped points with originalIndex ≤ lastRawIdx
-   *      - Include interpolated points (no originalIndex) that lie BETWEEN
-   *        two in-range originals (i.e. before passedFinalOriginal is set)
-   *      - Once originalIndex === lastRawIdx is seen, set passedFinalOriginal;
-   *        any further interpolated points are road AHEAD of the bus — exclude them
-   *      - Stop on the first originalIndex > lastRawIdx
+   *   2. Find the last snapped point whose originalIndex ≤ lastRawIdx (cutoffSnappedIdx)
+   *   3. slice(0, cutoffSnappedIdx + 1) naturally includes all interpolated road-geometry
+   *      points that precede it (road the bus has already traveled) while excluding any
+   *      interpolated points after the last in-range original (road ahead of the bus).
    */
   const displayedRoutes = useMemo(() => {
     const routes     = new Map<string, LatLng[]>();
@@ -399,19 +396,15 @@ export default function TransportMap({
       }
       if (lastRawIdx < 0) return;
 
-      let cutoffSnappedIdx    = -1;
-      let passedFinalOriginal = false;
+      let cutoffSnappedIdx = -1;
       for (let i = 0; i < snapped.length; i++) {
         const oi = snapped[i].originalIndex;
         if (oi !== undefined) {
           if (oi <= lastRawIdx) {
-            cutoffSnappedIdx    = i;
-            passedFinalOriginal = (oi === lastRawIdx);
+            cutoffSnappedIdx = i;
           } else {
             break;
           }
-        } else if (!passedFinalOriginal && cutoffSnappedIdx >= 0) {
-          cutoffSnappedIdx = i;
         }
       }
 
