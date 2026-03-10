@@ -1,0 +1,13 @@
+# React Frontend Configuration
+
+[system]
+source = "local"
+limit  = 50
+
+[transport]
+source = "transport_api"
+
+[transport.map]
+centre_lat = 53.3498
+centre_lng = -6.2603
+zoom       = 11
