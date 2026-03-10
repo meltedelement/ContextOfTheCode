@@ -131,6 +131,7 @@ class MobileAppCollectorConfig(BaseModel):
 class AggregatorConfig(BaseModel):
     """Configuration for aggregator identity."""
     name: str = Field(description="Human-readable name for this aggregator")
+    command_port: int = Field(default=5001, description="Port for the restart command HTTP server")
 
 
 class AppConfig(BaseModel):

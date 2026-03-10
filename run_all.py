@@ -16,6 +16,8 @@ import sys
 import time
 import signal
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -48,6 +50,40 @@ REDIS_CHECK_TIMEOUT_SECONDS = 2     # Socket connect timeout when verifying Redi
 SHUTDOWN_POLL_INTERVAL_SECONDS = 1  # How often the main loop checks for a stop signal
 
 running = True
+restart_requested = False
+
+
+def start_command_server(port: int):
+    """
+    Start a small HTTP server in a background thread that accepts restart commands.
+
+    POST /restart → gracefully stops collectors and re-execs run_all.py.
+    Accessible over Tailscale by any machine on the tailnet.
+    """
+    global running, restart_requested
+
+    class CommandHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            global running, restart_requested
+            if self.path == "/restart":
+                logger.info("Restart command received from %s", self.client_address[0])
+                restart_requested = True
+                running = False
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status": "restarting"}')
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, format, *args):  # noqa: A002
+            pass  # suppress default HTTP request logging
+
+    server = HTTPServer(("0.0.0.0", port), CommandHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info("Command server listening on port %d (POST /restart to restart)", port)
 
 
 def check_redis_running() -> bool:
@@ -348,6 +384,10 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
+        # Step 0: Start command server (restart endpoint over Tailscale)
+        config = get_typed_config()
+        start_command_server(config.aggregator.command_port)
+
         # Step 1: Check Redis
         if not check_redis_running():
             logger.error("")
@@ -356,7 +396,7 @@ def main():
         logger.info("")
 
         # Step 2: Check remote Flask server is reachable
-        config = get_typed_config()
+        config = get_typed_config()  # re-read after Step 0 to avoid stale ref
         registration_base_url = config.upload_queue.registration_base_url
         if not wait_for_flask_healthy(registration_base_url):
             logger.error("Flask health check failed — aborting")
@@ -391,6 +431,10 @@ def main():
         return 1
     finally:
         cleanup()
+
+    if restart_requested:
+        logger.info("Restarting process...")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     return 0
 
