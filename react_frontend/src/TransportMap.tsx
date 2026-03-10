@@ -104,8 +104,9 @@ async function snapToRoads(pts: LatLng[], apiKey: string): Promise<SnappedPoint[
   let chunkOffset = 0;
 
   for (let i = 0; i < pts.length; i += CHUNK) {
-    const chunk = pts.slice(i, i + CHUNK);
-    const path  = chunk.map((p) => `${p.lat},${p.lng}`).join("|");
+    const chunk  = pts.slice(i, i + CHUNK);
+    const path   = chunk.map((p) => `${p.lat},${p.lng}`).join("|");
+    const offset = chunkOffset; // capture before any await so callbacks close over the right value
     try {
       const res  = await fetch(
         `https://roads.googleapis.com/v1/snapToRoads?path=${path}&interpolate=true&key=${apiKey}`,
@@ -117,17 +118,17 @@ async function snapToRoads(pts: LatLng[], apiKey: string): Promise<SnappedPoint[
             lat: sp.location.latitude,
             lng: sp.location.longitude,
             originalIndex: sp.originalIndex !== undefined
-              ? (sp.originalIndex as number) + chunkOffset
+              ? (sp.originalIndex as number) + offset
               : undefined,
           })),
         );
       } else {
         console.warn("snapToRoads: empty response", data);
-        result.push(...chunk.map((p, j) => ({ ...p, originalIndex: chunkOffset + j })));
+        result.push(...chunk.map((p, j) => ({ ...p, originalIndex: offset + j })));
       }
     } catch (err) {
       console.warn("snapToRoads: request failed", err);
-      result.push(...chunk.map((p, j) => ({ ...p, originalIndex: chunkOffset + j })));
+      result.push(...chunk.map((p, j) => ({ ...p, originalIndex: offset + j })));
     }
     chunkOffset += chunk.length;
   }
