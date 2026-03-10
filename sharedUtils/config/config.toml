@@ -49,7 +49,7 @@ query_limit = 30
 
 [aggregator]
 # Human-readable name for this aggregator (machine running run_all.py)
-name = "SavageLaptop"
+name = "Meltedelement"
 
 [upload_queue]
 # Redis-based persistent upload queue
