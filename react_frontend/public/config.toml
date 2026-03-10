@@ -29,9 +29,3 @@ source         = "mobile_app"
 snapshot_limit = 1000
 poll_interval  = 5000
 staleness_secs = 120
-
-# List of collector machines to show restart buttons for.
-# Each entry needs a name (display label) and restart_url (POST endpoint).
-[[aggregators.list]]
-name        = "SavageLaptop"
-restart_url = "http://100.68.24.128:5050/restart"
