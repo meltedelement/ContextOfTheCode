@@ -50,6 +50,27 @@ WORKER_STOP_TIMEOUT = 5      # Seconds to wait for the worker thread to shut dow
 RETRY_BATCH_SIZE = 10        # Max retry-queue entries promoted to pending per loop iteration
 BRPOP_TIMEOUT = 1            # Seconds brpop blocks waiting for a new pending message
 ERROR_PREVIEW_LEN = 200      # Max characters of HTTP error response body to log
+WORKER_HEARTBEAT_INTERVAL = 60  # Seconds between worker stats log lines
+
+
+def _classify_error(error: str) -> str:
+    """Classify an error string from _attempt_upload as "permanent" or "transient".
+
+    Permanent: 4xx HTTP status codes, missing endpoint configuration.
+    Transient: 5xx HTTP status codes, timeouts, connection errors, unexpected errors.
+    """
+    if not error:
+        return "transient"
+    if "No api_endpoint configured" in error:
+        return "permanent"
+    if error.startswith("HTTP "):
+        try:
+            status_code = int(error.split()[1].rstrip(":"))
+            if 400 <= status_code < 500:
+                return "permanent"
+        except (IndexError, ValueError):
+            pass
+    return "transient"
 
 
 def _classify_error(error: str) -> str:
@@ -131,6 +152,8 @@ class RedisUploadQueue:
         self.backoff_base = config.backoff_base
         self.backoff_multiplier = config.backoff_multiplier
         self.worker_sleep = config.worker_sleep
+        self.batch_size = config.batch_size
+        self.batch_endpoint = (self.api_endpoint.rstrip("/") + "/batch") if self.api_endpoint else None
 
         # Runtime state
         self.redis_client: Optional[redis.Redis] = None
@@ -294,13 +317,33 @@ class RedisUploadQueue:
         """
         logger.info("Worker thread started")
 
+        last_heartbeat = time.time()
+        messages_processed = 0
+
         while self.running:
             try:
                 # Process retry queue first (messages with scheduled retry time)
                 self._process_retry_queue()
 
-                # Process main pending queue
-                processed = self._process_pending_queue()
+                # Process main pending queue in batches
+                batch_count = self._process_pending_batch()
+                processed = batch_count > 0
+                if processed:
+                    messages_processed += batch_count
+
+                # Periodic heartbeat: log queue stats so the worker is never silent
+                now = time.time()
+                if now - last_heartbeat >= WORKER_HEARTBEAT_INTERVAL:
+                    stats = self.get_stats()
+                    logger.info(
+                        "Worker heartbeat — processed=%d, pending=%d, retry=%d, failed=%d",
+                        messages_processed,
+                        stats["pending"],
+                        stats["retry"],
+                        stats["failed"],
+                    )
+                    messages_processed = 0
+                    last_heartbeat = now
 
                 # Sleep if no work was done
                 if not processed:
@@ -350,6 +393,113 @@ class RedisUploadQueue:
 
         except redis.RedisError as e:
             logger.error("Error processing retry queue: %s", str(e))
+
+    def _process_pending_batch(self) -> int:
+        """
+        Pop up to batch_size envelopes from the pending queue and upload them in one request.
+
+        Uses brpop to block until at least one message is available, then drains up to
+        batch_size-1 more with a non-blocking pipeline pop before sending.
+
+        Returns:
+            Number of envelopes processed (0 if queue was empty).
+        """
+        try:
+            # Block until at least one message is available
+            result = self.redis_client.brpop(self.PENDING_QUEUE, timeout=BRPOP_TIMEOUT)
+            if not result:
+                return 0
+
+            envelope_jsons = [result[1]]
+
+            # Grab up to batch_size-1 more without blocking
+            if self.batch_size > 1:
+                pipe = self.redis_client.pipeline()
+                for _ in range(self.batch_size - 1):
+                    pipe.rpop(self.PENDING_QUEUE)
+                envelope_jsons += [r for r in pipe.execute() if r is not None]
+
+            # Parse envelopes
+            envelopes = []
+            for ej in envelope_jsons:
+                try:
+                    envelopes.append((ej, json.loads(ej)))
+                except json.JSONDecodeError:
+                    logger.error("Failed to parse envelope JSON, discarding")
+
+            if not envelopes:
+                return 0
+
+            # Extract payloads for upload
+            payloads = []
+            for _, env in envelopes:
+                try:
+                    payloads.append(json.loads(env["payload"]))
+                except (json.JSONDecodeError, KeyError):
+                    logger.error("Malformed envelope payload, skipping")
+
+            success, error = self._attempt_batch_upload(payloads)
+
+            if success:
+                if self._had_transient_failures:
+                    self._recover_transient_failures()
+                    self._had_transient_failures = False
+                logger.debug("Batch of %d snapshots uploaded successfully", len(envelopes))
+                return len(envelopes)
+
+            # Batch failed — route each envelope individually
+            failure_class = _classify_error(error)
+            if failure_class == "transient":
+                self._had_transient_failures = True
+
+            for envelope_json, envelope in envelopes:
+                retry_count = envelope.get("retry_count", 0) + 1
+                envelope["retry_count"] = retry_count
+                envelope["last_error"] = error
+                envelope["failure_class"] = failure_class
+                from_failed = envelope.get("from_failed", False)
+
+                if failure_class == "permanent" or from_failed:
+                    self.redis_client.lpush(self.FAILED_QUEUE, json.dumps(envelope))
+                elif retry_count >= self.max_retry_attempts:
+                    self.redis_client.lpush(self.FAILED_QUEUE, json.dumps(envelope))
+                else:
+                    delay = self.backoff_base * (self.backoff_multiplier ** (retry_count - 1))
+                    retry_at = time.time() + delay
+                    self.redis_client.zadd(self.RETRY_QUEUE, {json.dumps(envelope): retry_at})
+
+            logger.warning(
+                "Batch of %d snapshots failed (%s), re-queued for retry. Error: %s",
+                len(envelopes), failure_class, error
+            )
+            return len(envelopes)
+
+        except redis.RedisError as e:
+            logger.error("Redis error in batch processing: %s", e)
+            return 0
+        except Exception as e:
+            logger.error("Unexpected error in batch processing: %s", e)
+            return 0
+
+    def _attempt_batch_upload(self, payloads: list) -> tuple[bool, str | None]:
+        """POST a list of snapshot payloads to the batch endpoint in one request."""
+        if not self.batch_endpoint:
+            return False, "No api_endpoint configured"
+        try:
+            response = self.session.post(
+                self.batch_endpoint,
+                data=json.dumps(payloads),
+                timeout=self.timeout,
+            )
+            if 200 <= response.status_code < 300:
+                return True, None
+            return False, f"HTTP {response.status_code}: {response.text[:ERROR_PREVIEW_LEN]}"
+        except requests.exceptions.Timeout:
+            return False, "Request timed out"
+        except requests.exceptions.ConnectionError as e:
+            return False, f"ConnectionError: {e}"
+        except Exception as e:
+            return False, f"Unexpected error: {e}"
 
     def _process_pending_queue(self) -> bool:
         """
@@ -526,7 +676,7 @@ class RedisUploadQueue:
 
             # Accept any 2xx status code as success (200, 201, 204, etc.)
             if 200 <= response.status_code < 300:
-                logger.info("Successfully uploaded message %s (HTTP %d)", message_id, response.status_code)
+                logger.debug("Successfully uploaded message %s (HTTP %d)", message_id, response.status_code)
                 return True, None
             else:
                 error = f"HTTP {response.status_code}: {response.text[:ERROR_PREVIEW_LEN]}"

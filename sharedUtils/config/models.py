@@ -75,6 +75,7 @@ class UploadQueueConfig(BaseModel):
     backoff_multiplier: int = Field(default=2, description="Exponential backoff multiplier")
     timeout: int = Field(default=10, description="HTTP request timeout")
     worker_sleep: int = Field(default=1, description="Worker sleep time when queue is empty")
+    batch_size: int = Field(default=50, description="Number of snapshots to send per batch upload")
     registration_base_url: str = Field(default="http://100.67.157.90:5000", description="Base URL for /aggregators and /devices registration")
 
     @field_validator("redis_port")

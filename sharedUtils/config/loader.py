@@ -1,6 +1,6 @@
 """Configuration loader with lazy singleton pattern."""
 
-from typing import Dict, Any, Optional
+from typing import Optional
 import threading
 import tomllib
 from pathlib import Path
@@ -17,48 +17,13 @@ from sharedUtils.config.models import (
 
 logger = get_logger(__name__)
 
-# Global config cache (singleton)
 _lock = threading.Lock()
-_CONFIG_CACHE: Optional[Dict[str, Any]] = None
 _TYPED_CONFIG_CACHE: Optional[AppConfig] = None
-
-
-def get_config() -> Dict[str, Any]:
-    """
-    Get configuration dictionary (lazy-loaded singleton).
-
-    Loads config from sharedUtils/config/config.toml on first access
-    and caches it for subsequent calls. Thread-safe via double-checked locking.
-
-    Returns:
-        Configuration dictionary
-
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-    """
-    global _CONFIG_CACHE
-
-    if _CONFIG_CACHE is None:
-        with _lock:
-            if _CONFIG_CACHE is None:
-                config_path = Path(__file__).parent / "config.toml"
-
-                logger.debug("Loading config from: %s", config_path)
-
-                if not config_path.exists():
-                    logger.error("Config file not found: %s", config_path)
-                    raise FileNotFoundError(f"Configuration file not found: {config_path}")
-
-                with open(config_path, "rb") as f:
-                    _CONFIG_CACHE = tomllib.load(f)
-                    logger.debug("Configuration loaded successfully")
-
-    return _CONFIG_CACHE
 
 
 def get_typed_config() -> AppConfig:
     """
-    Get typed configuration (lazy-loaded singleton with validation).
+    Get validated configuration (lazy-loaded singleton).
 
     Loads config from sharedUtils/config/config.toml on first access,
     validates it using Pydantic models, and caches it for subsequent calls.
@@ -76,9 +41,19 @@ def get_typed_config() -> AppConfig:
     if _TYPED_CONFIG_CACHE is None:
         with _lock:
             if _TYPED_CONFIG_CACHE is None:
-                config_dict = get_config()  # Reuse dict loading logic
+                config_path = Path(__file__).parent / "config.toml"
+
+                logger.debug("Loading config from: %s", config_path)
+
+                if not config_path.exists():
+                    logger.error("Config file not found: %s", config_path)
+                    raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+                with open(config_path, "rb") as f:
+                    config_dict = tomllib.load(f)
+
                 _TYPED_CONFIG_CACHE = AppConfig(**config_dict)
-                logger.debug("Configuration validated with Pydantic models")
+                logger.debug("Configuration loaded and validated")
 
     return _TYPED_CONFIG_CACHE
 
