@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useContext, useEffect, useState, useMemo, useCallback } from "react";
 import axios from "axios";
 import {
   Chart as ChartJS,
@@ -9,23 +9,10 @@ import {
   Tooltip,
 } from "chart.js";
 import { Line } from "react-chartjs-2";
+import { ConfigContext } from "./ConfigContext";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip);
 
-const API_BASE = "";
-
-// Unix timestamps from the server are in seconds; JS Date needs milliseconds.
-const MS_PER_SEC = 1000;
-
-const COLORS = [
-  "#2196F3", "#4CAF50", "#FF9800", "#F44336",
-  "#9C27B0", "#00BCD4", "#FF5722", "#607D8B",
-];
-
-// Hex opacity suffixes appended to COLORS entries
-const COLOR_OPACITY_FILL   = "22"; // ~13% — chart area fill
-const COLOR_OPACITY_BORDER = "55"; // ~33% — card border
-const COLOR_OPACITY_BG     = "11"; // ~7%  — card background
 
 const CHART = {
   MAX_X_TICKS:  8,
@@ -59,6 +46,7 @@ function MetricChart({ values, labels, color }: {
   labels: string[];
   color:  string;
 }) {
+  const { ui } = useContext(ConfigContext)!;
   return (
     <div style={{ height: "140px" }}>
       <Line
@@ -67,7 +55,7 @@ function MetricChart({ values, labels, color }: {
           datasets: [{
             data:            values,
             borderColor:     color,
-            backgroundColor: color + COLOR_OPACITY_FILL,
+            backgroundColor: color + ui.colour_opacity_fill,
             fill:            false,
             tension:         CHART.LINE_TENSION,
             pointRadius:     CHART.POINT_RADIUS,
@@ -90,9 +78,11 @@ function MetricChart({ values, labels, color }: {
 
 // ── One device's data ─────────────────────────────────────────────────────────
 
-function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
+function DeviceSection({ snaps, stalenessSecs }: { snaps: Snapshot[]; stalenessSecs: number }) {
+  const { ui } = useContext(ConfigContext)!;
   const latest    = snaps[snaps.length - 1];
-  const latencyMs = Math.round((latest.received_at - latest.collected_at) * MS_PER_SEC);
+  const latencyMs = Math.round((latest.received_at - latest.collected_at) * ui.ms_per_sec);
+  const isStale   = (Date.now() / ui.ms_per_sec - latest.collected_at) > stalenessSecs;
 
   const metricNames = useMemo(() => {
     const seen = new Set<string>();
@@ -117,12 +107,17 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
             Collected by <strong>{latest.aggregator_name || latest.aggregator_id || "–"}</strong>
           </div>
         </div>
-        <span style={{
-          fontSize: "11px", fontWeight: 600, background: "#e3edf7",
-          color: "#2563a8", borderRadius: "4px", padding: "3px 8px",
-        }}>
-          {latest.source}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "11px", fontWeight: 600, color: isStale ? "#FF9800" : "#4CAF50" }}>
+            {isStale ? "● Stale" : "● Live"}
+          </span>
+          <span style={{
+            fontSize: "11px", fontWeight: 600, background: "#e3edf7",
+            color: "#2563a8", borderRadius: "4px", padding: "3px 8px",
+          }}>
+            {latest.source}
+          </span>
+        </div>
       </div>
 
       <div style={{ padding: "16px 20px" }}>
@@ -158,11 +153,11 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
           </div>
           <div>
             <span style={{ color: "#999" }}>Collected at</span><br />
-            <span style={{ fontSize: "12px", color: "#222" }}>{new Date(latest.collected_at * MS_PER_SEC).toLocaleString()}</span>
+            <span style={{ fontSize: "12px", color: "#222" }}>{new Date(latest.collected_at * ui.ms_per_sec).toLocaleString()}</span>
           </div>
           <div>
             <span style={{ color: "#999" }}>Received at</span><br />
-            <span style={{ fontSize: "12px", color: "#222" }}>{new Date(latest.received_at * MS_PER_SEC).toLocaleString()}</span>
+            <span style={{ fontSize: "12px", color: "#222" }}>{new Date(latest.received_at * ui.ms_per_sec).toLocaleString()}</span>
           </div>
           <div>
             <span style={{ color: "#999" }}>Latency</span><br />
@@ -179,11 +174,11 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
           {metricNames.map((name, i) => {
             const m     = latest.metrics.find((m) => m.metric_name === name);
             if (!m) return null;
-            const color = COLORS[i % COLORS.length];
+            const color = ui.colours[i % ui.colours.length];
             return (
               <div key={name} style={{
                 flex: "1 1 130px", padding: "12px 14px", borderRadius: "8px",
-                border: `1px solid ${color}${COLOR_OPACITY_BORDER}`, background: color + COLOR_OPACITY_BG,
+                border: `1px solid ${color}${ui.colour_opacity_border}`, background: color + ui.colour_opacity_bg,
               }}>
                 <div style={{ fontSize: "10px", color: "#888", letterSpacing: "0.5px", marginBottom: "4px" }}>
                   {name.replace(/_/g, " ").toUpperCase()}
@@ -208,7 +203,7 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
               const m = s.metrics.find((m) => m.metric_name === name);
               if (m) {
                 values.push(m.metric_value);
-                labels.push(new Date(s.collected_at * MS_PER_SEC).toLocaleTimeString());
+                labels.push(new Date(s.collected_at * ui.ms_per_sec).toLocaleTimeString());
               }
             });
             const unit = latest.metrics.find((m) => m.metric_name === name)?.unit ?? "";
@@ -217,7 +212,7 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
                 <div style={{ fontSize: "12px", fontWeight: 600, color: "#444", marginBottom: "4px" }}>
                   {name.replace(/_/g, " ").toUpperCase()}{unit ? ` (${unit})` : ""}
                 </div>
-                <MetricChart values={values} labels={labels} color={COLORS[i % COLORS.length]} />
+                <MetricChart values={values} labels={labels} color={ui.colours[i % ui.colours.length]} />
               </div>
             );
           })}
@@ -231,22 +226,24 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
 // ── Main export ───────────────────────────────────────────────────────────────
 
 interface MetricsSectionProps {
-  source:        string;
-  limit?:        number;
-  pollInterval?: number;
+  source:         string;
+  limit?:         number;
+  pollInterval?:  number;
+  stalenessSecs?: number;
 }
 
-export default function MetricsSection({ source, limit = 50, pollInterval = 5000 }: MetricsSectionProps) {
+export default function MetricsSection({ source, limit = 50, pollInterval = 5000, stalenessSecs = 120 }: MetricsSectionProps) {
+  const { ui } = useContext(ConfigContext)!;
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
 
   const fetchSnapshots = useCallback(async () => {
     try {
-      const res = await axios.get(`${API_BASE}/api/metrics`, { params: { source, limit } });
+      const res = await axios.get(`${ui.api_base}/api/metrics`, { params: { source, limit } });
       setSnapshots(res.data.snapshots);
     } catch (err) {
       console.error(`Failed to fetch metrics for source "${source}":`, err);
     }
-  }, [source, limit]);
+  }, [source, limit, ui.api_base]);
 
   useEffect(() => {
     fetchSnapshots();
@@ -272,7 +269,7 @@ export default function MetricsSection({ source, limit = 50, pollInterval = 5000
   return (
     <div>
       {deviceGroups.map((snaps) => (
-        <DeviceSection key={snaps[0].device_id} snaps={snaps} />
+        <DeviceSection key={snaps[0].device_id} snaps={snaps} stalenessSecs={stalenessSecs} />
       ))}
     </div>
   );

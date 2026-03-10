@@ -28,9 +28,7 @@ cpu_sample_interval = 1.0
 metric_precision = 1
 
 [local_collector]
-# Set to false to disable this collector
-# enabled = false
-# How often to collect local system metrics (seconds)
+enabled = false
 collection_interval = 10
 
 [transport_collector]
@@ -53,7 +51,7 @@ query_limit = 30
 
 [aggregator]
 # Human-readable name for this aggregator (machine running run_all.py)
-name = "Aoibheann'sLaptop"
+name = "Meltedelement"
 
 [upload_queue]
 # Redis-based persistent upload queue

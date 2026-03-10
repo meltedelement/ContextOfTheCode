@@ -1,5 +1,14 @@
 # React Frontend Configuration
 
+[ui]
+api_base              = ""
+ms_per_sec            = 1000
+staleness_secs        = 120
+colours               = ["#2196F3", "#4CAF50", "#FF9800", "#F44336", "#9C27B0", "#00BCD4", "#FF5722", "#607D8B"]
+colour_opacity_fill   = "22"
+colour_opacity_border = "55"
+colour_opacity_bg     = "11"
+
 [system]
 source          = "local"
 snapshot_limit  = 5000
@@ -7,8 +16,15 @@ snapshot_limit  = 5000
 [transport]
 source         = "transport_api"
 snapshot_limit = 3000
+initial_limit  = 20000
+max_snapshots  = 20000
 
 [transport.map]
-centre_lat = 53.3498
-centre_lng = -6.2603
-zoom       = 11
+centre_lat = 52.6638
+centre_lng = -8.6267
+zoom       = 13
+
+[mobile_app]
+source         = "mobile_app"
+snapshot_limit = 1000
+poll_interval  = 5000

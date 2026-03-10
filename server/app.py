@@ -7,8 +7,7 @@ import uuid
 
 from flask import Flask, request, jsonify
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import asc, desc
-from sqlalchemy.orm import joinedload
+from sqlalchemy import text
 
 from server.database import Base, engine, get_db
 from server.models import Aggregator, Device, Snapshot, Metric
@@ -94,11 +93,12 @@ def post_devices():
             if not aggregator:
                 return jsonify({"error": f"Aggregator '{aggregator_id}' not found"}), 404
 
-            existing = db.query(Device).filter_by(aggregator_id=aggregator_id, name=name).first()
-            if existing:
-                logger.info("Device '%s' already registered under aggregator %s: %s",
-                            name, aggregator_id, existing.device_id)
-                return jsonify({"device_id": existing.device_id}), 200
+            device = db.query(Device).filter_by(
+                aggregator_id=aggregator_id, name=name, source=source
+            ).first()
+            if device:
+                logger.info("Device '%s' (source=%s) already registered: %s", name, source, device.device_id)
+                return jsonify({"device_id": device.device_id}), 200
 
             device_id = str(uuid.uuid4())
             db.add(Device(
@@ -111,6 +111,16 @@ def post_devices():
         logger.info("Registered device '%s' (source=%s) under aggregator %s: %s",
                     name, source, aggregator_id, device_id)
         return jsonify({"device_id": device_id}), 201
+
+    except IntegrityError:
+        # Race condition: another request registered the same device concurrently
+        with get_db() as db:
+            device = db.query(Device).filter_by(
+                aggregator_id=aggregator_id, name=name, source=source
+            ).first()
+            if device:
+                return jsonify({"device_id": device.device_id}), 200
+        return jsonify({"error": "Failed to register device"}), 500
 
     except Exception as e:
         logger.error("POST /devices: database error: %s", str(e))
@@ -254,10 +264,16 @@ def post_metrics_batch():
                         "unit": entry.get("unit", ""),
                     })
 
-            # Two bulk inserts instead of N individual ORM adds + flushes
+            # INSERT IGNORE skips duplicate snapshot_ids (e.g. retried batches)
             if snapshot_rows:
-                db.bulk_insert_mappings(Snapshot, snapshot_rows)
-                db.bulk_insert_mappings(Metric, metric_rows)
+                db.execute(
+                    text("INSERT IGNORE INTO snapshots (snapshot_id, device_id, vehicle_id, collected_at, received_at) VALUES (:snapshot_id, :device_id, :vehicle_id, :collected_at, :received_at)"),
+                    snapshot_rows,
+                )
+                db.execute(
+                    text("INSERT IGNORE INTO metrics (snapshot_id, metric_name, metric_value, unit) VALUES (:snapshot_id, :metric_name, :metric_value, :unit)"),
+                    metric_rows,
+                )
 
         logger.info("POST /api/metrics/batch: stored %d/%d snapshots (%d metrics)",
                      len(snapshot_rows), len(data), len(metric_rows))
@@ -292,43 +308,78 @@ def get_metrics():
 
     try:
         with get_db() as db:
-            query = db.query(Snapshot).options(
-                joinedload(Snapshot.metrics),
-                joinedload(Snapshot.device).joinedload(Device.aggregator),
-            )
+            # Build WHERE clauses dynamically so MySQL can use indexes.
+            # The previous IS NULL OR pattern prevented index usage, causing
+            # full table scans that degraded as the snapshots table grew.
+            where_clauses = []
+            params: dict = {"limit": limit}
 
             if device_id:
-                query = query.filter(Snapshot.device_id == device_id)
+                where_clauses.append("sn.device_id = :device_id")
+                params["device_id"] = device_id
             if source:
-                query = query.filter(Snapshot.device.has(Device.source == source))
+                where_clauses.append("d.source = :source")
+                params["source"] = source
             if since is not None:
-                query = query.filter(Snapshot.collected_at > since)
+                where_clauses.append("sn.collected_at > :since")
+                params["since"] = since
 
-            query = query.order_by(desc(Snapshot.collected_at)).limit(limit)
-            snapshots = list(reversed(query.all()))
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
-            result = [
-                {
-                    "snapshot_id":     s.snapshot_id,
-                    "device_id":       s.device_id,
-                    "vehicle_id":      s.vehicle_id,
-                    "device_name":     s.device.name,
-                    "source":          s.device.source,
-                    "aggregator_id":   s.device.aggregator_id,
-                    "aggregator_name": s.device.aggregator.name,
-                    "collected_at":    s.collected_at,
-                    "received_at":     s.received_at,
-                    "metrics": [
-                        {
-                            "metric_name":  m.metric_name,
-                            "metric_value": m.metric_value,
-                            "unit":         m.unit,
-                        }
-                        for m in s.metrics
-                    ],
-                }
-                for s in snapshots
-            ]
+            # Raw SQL with a subquery to apply LIMIT on snapshots before joining metrics.
+            # Subquery selects the N most recent matching snapshots (ORDER DESC + LIMIT),
+            # then the outer query re-joins and orders ASC for chronological output.
+            rows = db.execute(text(f"""
+                SELECT
+                    s.snapshot_id, s.device_id, s.vehicle_id,
+                    s.collected_at, s.received_at,
+                    d.name        AS device_name,
+                    d.source      AS source,
+                    d.aggregator_id,
+                    a.name        AS aggregator_name,
+                    m.metric_name, m.metric_value, m.unit
+                FROM (
+                    SELECT sn.snapshot_id, sn.device_id, sn.vehicle_id,
+                           sn.collected_at, sn.received_at
+                    FROM snapshots sn
+                    JOIN devices d ON sn.device_id = d.device_id
+                    {where_sql}
+                    ORDER BY sn.collected_at DESC
+                    LIMIT :limit
+                ) s
+                JOIN devices     d ON s.device_id      = d.device_id
+                JOIN aggregators a ON d.aggregator_id  = a.aggregator_id
+                LEFT JOIN metrics m ON s.snapshot_id   = m.snapshot_id
+                ORDER BY s.collected_at ASC, s.snapshot_id, m.metric_name
+            """), params)
+
+            # Collapse flat rows into per-snapshot dicts
+            snapshots_map: dict = {}
+            order: list = []
+            for row in rows:
+                sid = row.snapshot_id
+                if sid not in snapshots_map:
+                    snapshots_map[sid] = {
+                        "snapshot_id":     sid,
+                        "device_id":       row.device_id,
+                        "vehicle_id":      row.vehicle_id,
+                        "device_name":     row.device_name,
+                        "source":          row.source,
+                        "aggregator_id":   row.aggregator_id,
+                        "aggregator_name": row.aggregator_name,
+                        "collected_at":    row.collected_at,
+                        "received_at":     row.received_at,
+                        "metrics":         [],
+                    }
+                    order.append(sid)
+                if row.metric_name is not None:
+                    snapshots_map[sid]["metrics"].append({
+                        "metric_name":  row.metric_name,
+                        "metric_value": row.metric_value,
+                        "unit":         row.unit,
+                    })
+
+            result = [snapshots_map[sid] for sid in order]
 
         logger.info(
             "GET /api/metrics: returned %d snapshots (device=%s, source=%s, since=%s)",
