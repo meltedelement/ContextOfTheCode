@@ -95,6 +95,7 @@ class UploadQueueConfig(BaseModel):
 
 class TransportCollectorConfig(BaseModel):
     """Configuration for transport API collector."""
+    enabled: bool = Field(default=True, description="Whether this collector is enabled")
     collection_interval: int = Field(default=60, description="Collection interval in seconds")
     api_url: str = Field(description="Transport API endpoint URL")
     tripupdates_url: str = Field(description="Trip updates API endpoint URL")
