@@ -30,6 +30,9 @@ export interface FrontendConfig {
     poll_interval:  number;
     staleness_secs: number;
   };
+  aggregators: {
+    list: { name: string; restart_url: string }[];
+  };
 }
 
 export const ConfigContext = createContext<FrontendConfig | null>(null);

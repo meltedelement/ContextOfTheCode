@@ -1,12 +1,15 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { parse } from "smol-toml";
 import MetricsSection from "./MetricsSection";
 import TransportMap from "./TransportMap";
 import MobileSection from "./MobileSection";
 import { ConfigContext, FrontendConfig } from "./ConfigContext";
 
+type RestartStatus = "idle" | "loading" | "ok" | "error";
+
 export default function App() {
   const [config, setConfig] = useState<FrontendConfig | null>(null);
+  const [restartStatus, setRestartStatus] = useState<Record<string, RestartStatus>>({});
 
   useEffect(() => {
     fetch("/config.toml")
@@ -15,7 +18,21 @@ export default function App() {
       .catch((err) => console.error("Failed to load frontend config:", err));
   }, []);
 
+  const handleRestart = useCallback((name: string, url: string) => {
+    setRestartStatus((prev) => ({ ...prev, [name]: "loading" }));
+    fetch(url, { method: "POST" })
+      .then((r) => {
+        setRestartStatus((prev) => ({ ...prev, [name]: r.ok ? "ok" : "error" }));
+      })
+      .catch(() => setRestartStatus((prev) => ({ ...prev, [name]: "error" })))
+      .finally(() => {
+        setTimeout(() => setRestartStatus((prev) => ({ ...prev, [name]: "idle" })), 3000);
+      });
+  }, []);
+
   if (!config) return null;
+
+  console.log("config.aggregators:", config.aggregators);
 
   return (
     <ConfigContext.Provider value={config}>
@@ -42,6 +59,31 @@ export default function App() {
           pollInterval={config.mobile_app.poll_interval}
           stalenessSecs={config.mobile_app.staleness_secs}
         />
+
+        <h2 style={{ marginTop: "40px" }}>Aggregators</h2>
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          {(config.aggregators?.list ?? []).map(({ name, restart_url }) => {
+            const status = restartStatus[name] ?? "idle";
+            return (
+              <button
+                key={name}
+                onClick={() => handleRestart(name, restart_url)}
+                disabled={status === "loading"}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: "8px",
+                  border: "none",
+                  cursor: status === "loading" ? "not-allowed" : "pointer",
+                  fontWeight: 600,
+                  background: status === "ok" ? "#4CAF50" : status === "error" ? "#F44336" : "#2196F3",
+                  color: "#fff",
+                }}
+              >
+                {status === "loading" ? "Restarting..." : status === "ok" ? "Restarted!" : status === "error" ? "Failed" : `Restart ${name}`}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </ConfigContext.Provider>
   );
