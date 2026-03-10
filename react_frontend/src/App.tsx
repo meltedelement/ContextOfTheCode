@@ -14,7 +14,7 @@ export default function App() {
   useEffect(() => {
     fetch("/config.toml")
       .then((r) => r.text())
-      .then((text) => setConfig(parse(text) as FrontendConfig))
+      .then((text) => setConfig(parse(text) as unknown as FrontendConfig))
       .catch((err) => console.error("Failed to load frontend config:", err));
   }, []);
 
