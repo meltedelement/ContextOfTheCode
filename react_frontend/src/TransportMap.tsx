@@ -4,19 +4,11 @@ import axios from "axios";
 import { ConfigContext } from "./ConfigContext";
 
 
-const MAP_HEIGHT = "500px";
-
 // If the newest snapshot is older than this, the feed is considered stale
 const LIVE_FRESHNESS_SECS = 60;
 
 // Timestamps within 30 s of each other are considered one collection cycle.
 const CLUSTER_GAP_SECS = 30;
-
-// Route snapping config
-const ROUTE_MIN_MOVE_M  = 30;  // deduplicate points closer than this (metres)
-const ROUTE_MAX_POINTS  = 90;  // max points sent per Roads API request (hard limit 100)
-const ROUTE_MAX_VEHICLES = 200; // cap on how many vehicles we snap routes for
-const ROUTE_BATCH_SIZE  = 10;  // parallel Roads API calls per batch
 
 interface Metric {
   metric_name: string;
@@ -39,6 +31,22 @@ interface Snapshot {
 
 interface LatLng { lat: number; lng: number; }
 
+/** Raw GPS point with its collection timestamp. */
+interface RawPoint { lat: number; lng: number; t: number; }
+
+/**
+ * A road-snapped point. `originalIndex` is the index into the input RawPoint
+ * array this was snapped from; absent for interpolated geometry points added
+ * by the Roads API to follow the road between consecutive waypoints.
+ */
+interface SnappedPoint { lat: number; lng: number; originalIndex?: number; }
+
+/** Atomic unit stored per vehicle — raw inputs and their snapped road geometry. */
+interface VehicleRoute {
+  raw:     RawPoint[];
+  snapped: SnappedPoint[];
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function clusterTimestamps(timestamps: number[]): number[] {
@@ -58,7 +66,6 @@ function clusterTimestamps(timestamps: number[]): number[] {
   return times;
 }
 
-/** Straight-line distance between two GPS points in metres (Haversine). */
 function haversineM(a: LatLng, b: LatLng): number {
   const R  = 6371000;
   const φ1 = (a.lat * Math.PI) / 180;
@@ -69,7 +76,6 @@ function haversineM(a: LatLng, b: LatLng): number {
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-/** Remove consecutive points that are closer than minM metres. */
 function deduplicateByDistance(pts: LatLng[], minM: number): LatLng[] {
   if (pts.length === 0) return [];
   const out = [pts[0]];
@@ -79,7 +85,6 @@ function deduplicateByDistance(pts: LatLng[], minM: number): LatLng[] {
   return out;
 }
 
-/** Evenly thin an array to at most maxN entries. */
 function evenlyDownsample(pts: LatLng[], maxN: number): LatLng[] {
   if (pts.length <= maxN) return pts;
   const step = (pts.length - 1) / (maxN - 1);
@@ -87,17 +92,20 @@ function evenlyDownsample(pts: LatLng[], maxN: number): LatLng[] {
 }
 
 /**
- * Call the Google Roads API snapToRoads endpoint.
- * Handles chunking automatically (API limit: 100 points/request).
- * Falls back to raw points if the request fails.
+ * Call Roads API snapToRoads with `interpolate=true`.
+ * Returns snapped points, each optionally tagged with `originalIndex` of the
+ * corresponding input point (absent on interpolated geometry-only points).
+ * Handles chunking across the 100-point API limit, keeping originalIndex
+ * values globally consistent across chunks.
  */
-async function snapToRoads(pts: LatLng[], apiKey: string): Promise<LatLng[]> {
-  const CHUNK  = 100;
-  const result: LatLng[] = [];
+async function snapToRoads(pts: LatLng[], apiKey: string): Promise<SnappedPoint[]> {
+  const CHUNK = 100;
+  const result: SnappedPoint[] = [];
+  let chunkOffset = 0;
 
   for (let i = 0; i < pts.length; i += CHUNK) {
     const chunk = pts.slice(i, i + CHUNK);
-    const path  = chunk.map(p => `${p.lat},${p.lng}`).join("|");
+    const path  = chunk.map((p) => `${p.lat},${p.lng}`).join("|");
     try {
       const res  = await fetch(
         `https://roads.googleapis.com/v1/snapToRoads?path=${path}&interpolate=true&key=${apiKey}`,
@@ -108,16 +116,20 @@ async function snapToRoads(pts: LatLng[], apiKey: string): Promise<LatLng[]> {
           ...data.snappedPoints.map((sp: any) => ({
             lat: sp.location.latitude,
             lng: sp.location.longitude,
+            originalIndex: sp.originalIndex !== undefined
+              ? (sp.originalIndex as number) + chunkOffset
+              : undefined,
           })),
         );
       } else {
         console.warn("snapToRoads: empty response", data);
-        result.push(...chunk);
+        result.push(...chunk.map((p, j) => ({ ...p, originalIndex: chunkOffset + j })));
       }
     } catch (err) {
       console.warn("snapToRoads: request failed", err);
-      result.push(...chunk);
+      result.push(...chunk.map((p, j) => ({ ...p, originalIndex: chunkOffset + j })));
     }
+    chunkOffset += chunk.length;
   }
 
   return result;
@@ -135,8 +147,6 @@ interface TransportMapProps {
   defaultZoom?: number;
 }
 
-const mapContainerStyle = { width: "100%", height: MAP_HEIGHT };
-
 export default function TransportMap({
   source,
   limit = 100,
@@ -153,22 +163,34 @@ export default function TransportMap({
   const [isLive, setIsLive]                   = useState(true);
   const [selectedId, setSelectedId]           = useState<string | null>(null);
   const [snapshotCount, setSnapshotCount]     = useState<number>(0);
-  const [vehicleRoutes, setVehicleRoutes]     = useState<Map<string, LatLng[]>>(new Map());
-  const [routesLoading, setRoutesLoading]     = useState(false);
 
-  const selectedTime = collectionTimes[selectedIndex] ?? 0;
+  // Atomic per-vehicle route state: raw inputs + snapped road geometry stored together
+  // so there is never a render where one is stale relative to the other.
+  const [vehicleRoutes, setVehicleRoutes] = useState<Map<string, VehicleRoute>>(new Map());
+  const [routesLoading, setRoutesLoading] = useState(false);
 
-  const isLiveRef           = useRef(true);
-  const maxCollectedAtRef   = useRef<number | null>(null);
-  const routePointCounts    = useRef<Map<string, number>>(new Map());
+  const selectedTime      = collectionTimes[selectedIndex] ?? 0;
+  const isLiveRef         = useRef(true);
+  const maxCollectedAtRef = useRef<number | null>(null);
+  // Per-vehicle: raw point count at the time of the last successful snap.
+  // Updated only when a full batch completes without cancellation, so a
+  // cancelled run never poisons the cache and forces a re-snap next time.
+  const routePointCounts  = useRef<Map<string, number>>(new Map());
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY ?? "",
   });
 
-  const { ui } = useContext(ConfigContext)!;
+  const config = useContext(ConfigContext)!;
+  const { ui, transport } = config;
+  const routeCfg = transport.route;
+  const mapHeight = `${transport.map.height_px}px`;
+  const mapContainerStyle = useMemo(
+    () => ({ width: "100%", height: mapHeight }),
+    [mapHeight],
+  );
 
-  // ── Derive time range / collection cluster list ──
+  // ── Derive time range / cluster list ──
   useEffect(() => {
     if (snapshots.length === 0) return;
     const timestamps = snapshots.map((s) => s.collected_at);
@@ -181,14 +203,17 @@ export default function TransportMap({
     if (isLiveRef.current) setSelectedIndex(times.length - 1);
   }, [snapshots]);
 
-  // ── Compute road-snapped routes for all vehicles ──
+  // ── Compute road-snapped routes ──
   useEffect(() => {
     if (snapshots.length === 0) return;
 
-    const apiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY ?? "";
+    const apiKey   = process.env.REACT_APP_GOOGLE_MAPS_API_KEY ?? "";
+    const minMoveM = routeCfg.min_move_m;
+    const maxPts   = routeCfg.max_points;
+    const batchSz  = routeCfg.batch_size;
 
-    // Build per-vehicle point arrays sorted chronologically
-    const byVehicle = new Map<string, Array<LatLng & { t: number }>>();
+    // Build per-vehicle chronological GPS arrays from all snapshots
+    const byVehicle = new Map<string, RawPoint[]>();
     for (const snap of snapshots) {
       const id   = snap.vehicle_id ?? snap.snapshot_id.slice(0, 8);
       const find = (n: string) => snap.metrics.find((m) => m.metric_name === n)?.metric_value;
@@ -200,43 +225,52 @@ export default function TransportMap({
     }
     byVehicle.forEach((pts) => pts.sort((a, b) => a.t - b.t));
 
-    // Only process vehicles that have new or more points since last snap
-    const toProcess: Array<[string, LatLng[], number]> = [];
+    // Determine which vehicles need (re-)snapping
+    const toProcess: Array<{ id: string; sampled: RawPoint[]; rawCount: number }> = [];
     byVehicle.forEach((rawPts, id) => {
       if (rawPts.length < 2) return;
-      const prevCount = routePointCounts.current.get(id) ?? 0;
-      if (rawPts.length <= prevCount) return;
-      const deduped = deduplicateByDistance(rawPts, ROUTE_MIN_MOVE_M);
+      const prev = routePointCounts.current.get(id) ?? 0;
+      if (rawPts.length <= prev) return;
+
+      const deduped = deduplicateByDistance(rawPts, minMoveM);
+      // Always preserve the most recent GPS point as the route head — deduplication
+      // drops it when the bus moved less than minMoveM since the previous kept point.
+      const lastRaw = rawPts[rawPts.length - 1];
+      if (deduped[deduped.length - 1] !== lastRaw) deduped.push(lastRaw);
       if (deduped.length < 2) return;
-      const sampled = evenlyDownsample(deduped, ROUTE_MAX_POINTS);
-      toProcess.push([id, sampled, rawPts.length]);
+
+      // evenlyDownsample returns references to the original objects, preserving `.t`
+      const sampled = evenlyDownsample(deduped as RawPoint[], maxPts) as RawPoint[];
+      toProcess.push({ id, sampled, rawCount: rawPts.length });
     });
 
     if (toProcess.length === 0) return;
-
-    // Prioritise by most movement, cap total
-    toProcess.sort((a, b) => b[2] - a[2]);
-    const capped = toProcess.slice(0, ROUTE_MAX_VEHICLES);
 
     let cancelled = false;
     setRoutesLoading(true);
 
     (async () => {
-      const updates = new Map<string, LatLng[]>();
+      // Collect all updates locally; only write to state and routePointCounts if
+      // the entire run completes without cancellation. This prevents a cancelled
+      // mid-run from poisoning the count cache and skipping those vehicles forever.
+      const updates  = new Map<string, VehicleRoute>();
+      const newCounts = new Map<string, number>();
 
-      for (let i = 0; i < capped.length; i += ROUTE_BATCH_SIZE) {
+      for (let i = 0; i < toProcess.length; i += batchSz) {
         if (cancelled) break;
-        const batch = capped.slice(i, i + ROUTE_BATCH_SIZE);
+        const batch = toProcess.slice(i, i + batchSz);
         await Promise.all(
-          batch.map(async ([id, pts, rawCount]) => {
-            const snapped = await snapToRoads(pts, apiKey);
-            routePointCounts.current.set(id, rawCount);
-            updates.set(id, snapped);
+          batch.map(async ({ id, sampled, rawCount }) => {
+            const snapped = await snapToRoads(sampled, apiKey);
+            updates.set(id, { raw: sampled, snapped });
+            newCounts.set(id, rawCount);
           }),
         );
       }
 
       if (!cancelled) {
+        // Apply count cache only on full success
+        newCounts.forEach((count, id) => routePointCounts.current.set(id, count));
         setVehicleRoutes((prev) => {
           const next = new Map(prev);
           updates.forEach((v, k) => next.set(k, v));
@@ -247,7 +281,7 @@ export default function TransportMap({
     })();
 
     return () => { cancelled = true; };
-  }, [snapshots]);
+  }, [snapshots, routeCfg.min_move_m, routeCfg.max_points, routeCfg.batch_size]);
 
   // ── Data fetching ──
   const fetchInitial = useCallback(async (signal: AbortSignal) => {
@@ -317,18 +351,15 @@ export default function TransportMap({
   // ── Vehicles at selected time ──
   const displayedVehicles = useMemo(() => {
     if (!timeRange || collectionTimes.length === 0) return [];
-
     const intervalSnaps = snapshots.filter(
       (s) => Math.abs(s.collected_at - selectedTime) <= CLUSTER_GAP_SECS,
     );
-
     const byVehicle = new Map<string, Snapshot>();
     for (const snap of intervalSnaps) {
       const id       = snap.vehicle_id ?? snap.snapshot_id.slice(0, 8);
       const existing = byVehicle.get(id);
       if (!existing || snap.collected_at > existing.collected_at) byVehicle.set(id, snap);
     }
-
     const result: { id: string; pos: { lat: number; lng: number; delay?: number } }[] = [];
     byVehicle.forEach((snap, id) => {
       const find = (name: string) => snap.metrics.find((m: Metric) => m.metric_name === name)?.metric_value;
@@ -340,11 +371,62 @@ export default function TransportMap({
     return result;
   }, [snapshots, selectedTime, timeRange, collectionTimes]);
 
-  // ── Stable colour assignment (by order of first appearance in routes) ──
+  /**
+   * Trim each vehicle's snapped road geometry to exactly the path travelled
+   * up to selectedTime. Never shows future road segments.
+   *
+   * Strategy:
+   *   1. Find lastRawIdx — the last raw input point whose timestamp ≤ selectedTime
+   *   2. Walk the snapped array forward:
+   *      - Include snapped points with originalIndex ≤ lastRawIdx
+   *      - Include interpolated points (no originalIndex) that lie BETWEEN
+   *        two in-range originals (i.e. before passedFinalOriginal is set)
+   *      - Once originalIndex === lastRawIdx is seen, set passedFinalOriginal;
+   *        any further interpolated points are road AHEAD of the bus — exclude them
+   *      - Stop on the first originalIndex > lastRawIdx
+   */
+  const displayedRoutes = useMemo(() => {
+    const routes     = new Map<string, LatLng[]>();
+    const cutoffTime = selectedTime;
+
+    vehicleRoutes.forEach(({ raw: rawPts, snapped }, id) => {
+      if (snapped.length === 0) return;
+
+      let lastRawIdx = -1;
+      for (let i = 0; i < rawPts.length; i++) {
+        if (rawPts[i].t <= cutoffTime) lastRawIdx = i;
+      }
+      if (lastRawIdx < 0) return;
+
+      let cutoffSnappedIdx    = -1;
+      let passedFinalOriginal = false;
+      for (let i = 0; i < snapped.length; i++) {
+        const oi = snapped[i].originalIndex;
+        if (oi !== undefined) {
+          if (oi <= lastRawIdx) {
+            cutoffSnappedIdx    = i;
+            passedFinalOriginal = (oi === lastRawIdx);
+          } else {
+            break;
+          }
+        } else if (!passedFinalOriginal && cutoffSnappedIdx >= 0) {
+          cutoffSnappedIdx = i;
+        }
+      }
+
+      if (cutoffSnappedIdx >= 1) {
+        routes.set(id, snapped.slice(0, cutoffSnappedIdx + 1));
+      }
+    });
+
+    return routes;
+  }, [vehicleRoutes, selectedTime]);
+
+  // ── Stable colour assignment ──
   const vehicleColors = useMemo(() => {
     const palette = ui.colours?.length ? ui.colours : [
       "#2196F3", "#4CAF50", "#FF9800", "#E91E63", "#9C27B0",
-      "#00BCD4", "#FF5722", "#8BC34A", "#FFC107", "#3F51B5",
+      "#00BCD4", "#FF5722", "#607D8B", "#8BC34A", "#FFC107",
     ];
     const map = new Map<string, string>();
     let i = 0;
@@ -361,11 +443,11 @@ export default function TransportMap({
   if (!timeRange || snapshots.length === 0)
     return <p style={{ color: "#999", fontSize: "14px" }}>No data yet for source "{source}".</p>;
 
-  const selectedSnap  = snapshots.filter((s) => s.collected_at <= selectedTime).at(-1)
+  const selectedSnap = snapshots.filter((s) => s.collected_at <= selectedTime).at(-1)
     ?? snapshots[snapshots.length - 1];
-  const selected      = displayedVehicles.find((v) => v.id === selectedId) ?? null;
-  const latencyMs     = Math.round((selectedSnap.received_at - selectedSnap.collected_at) * ui.ms_per_sec);
-  const isDataFresh   = (Date.now() / ui.ms_per_sec - timeRange.max) <= LIVE_FRESHNESS_SECS;
+  const selected     = displayedVehicles.find((v) => v.id === selectedId) ?? null;
+  const latencyMs    = Math.round((selectedSnap.received_at - selectedSnap.collected_at) * ui.ms_per_sec);
+  const isDataFresh  = (Date.now() / ui.ms_per_sec - timeRange.max) <= LIVE_FRESHNESS_SECS;
 
   return (
     <div style={{ border: "1px solid #e0e0e0", borderRadius: "10px", marginBottom: "40px", overflow: "hidden" }}>
@@ -423,7 +505,7 @@ export default function TransportMap({
             ["Latency",          `${latencyMs} ms`],
             ["Snapshots loaded", String(snapshotCount)],
             ["Vehicles tracked", String(displayedVehicles.length)],
-            ["Routes mapped",    `${vehicleRoutes.size}${routesLoading ? "…" : ""}`],
+            ["Routes snapped",   `${vehicleRoutes.size}${routesLoading ? "…" : ""}`],
           ] as [string, string, boolean?][]).map(([label, value, mono]) => (
             <div key={label}>
               <span style={{ color: "#999" }}>{label}: </span>
@@ -479,15 +561,15 @@ export default function TransportMap({
         {/* ── Map ── */}
         <GoogleMap mapContainerStyle={mapContainerStyle} center={defaultCenter} zoom={defaultZoom}>
 
-          {/* Road-snapped route polylines (rendered under markers) */}
-          {Array.from(vehicleRoutes.entries()).map(([id, path]) => (
+          {/* Road-snapped route polylines — rendered under markers */}
+          {Array.from(displayedRoutes.entries()).map(([id, path]) => (
             <Polyline
               key={`route-${id}`}
               path={path}
               options={{
                 strokeColor:   vehicleColors.get(id) ?? "#2196F3",
-                strokeWeight:  3,
-                strokeOpacity: 0.75,
+                strokeWeight:  routeCfg.stroke_weight,
+                strokeOpacity: routeCfg.stroke_opacity,
               }}
             />
           ))}
@@ -501,7 +583,7 @@ export default function TransportMap({
             />
           ))}
 
-          {/* Info window for selected vehicle */}
+          {/* Info window */}
           {selected && selectedId && (
             <InfoWindow
               position={{ lat: selected.pos.lat, lng: selected.pos.lng }}
@@ -515,9 +597,9 @@ export default function TransportMap({
                 <p style={{ margin: "4px 0 0", fontSize: "11px", color: "#666" }}>
                   {selected.pos.lat.toFixed(5)}, {selected.pos.lng.toFixed(5)}
                 </p>
-                {vehicleRoutes.has(selectedId) && (
+                {displayedRoutes.has(selectedId) && (
                   <p style={{ margin: "4px 0 0", fontSize: "11px", color: "#888" }}>
-                    Route: {vehicleRoutes.get(selectedId)!.length} snapped points
+                    {displayedRoutes.get(selectedId)!.length} road pts
                   </p>
                 )}
               </div>
