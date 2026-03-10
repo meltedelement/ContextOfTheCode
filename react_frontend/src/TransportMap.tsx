@@ -4,6 +4,11 @@ import axios from "axios";
 
 const API_BASE = "";
 
+// Unix timestamps from the server are in seconds; JS Date needs milliseconds.
+const MS_PER_SEC = 1000;
+
+const MAP_HEIGHT = "500px";
+
 interface Metric {
   metric_name: string;
   metric_value: number;
@@ -75,7 +80,7 @@ interface TransportMapProps {
   defaultZoom?: number;
 }
 
-const mapContainerStyle = { width: "100%", height: "500px" };
+const mapContainerStyle = { width: "100%", height: MAP_HEIGHT };
 
 export default function TransportMap({
   source,
@@ -144,7 +149,7 @@ export default function TransportMap({
   if (!timeRange || !latestSnap) return <p style={{ color: "#999", fontSize: "14px" }}>No data yet for source "{source}".</p>;
 
   const selected = displayedVehicles.find((v) => v.id === selectedId);
-  const latencyMs = Math.round((latestSnap.received_at - latestSnap.collected_at) * 1000);
+  const latencyMs = Math.round((latestSnap.received_at - latestSnap.collected_at) * MS_PER_SEC);
 
   return (
     <div style={{ border: "1px solid #e0e0e0", borderRadius: "10px", marginBottom: "40px", overflow: "hidden" }}>
@@ -192,8 +197,8 @@ export default function TransportMap({
             ["Device ID",        latestSnap.device_id,       true],
             ["Aggregator ID",    latestSnap.aggregator_id,   true],
             ["Snapshot ID",      latestSnap.snapshot_id,     true],
-            ["Collected at",     new Date(latestSnap.collected_at * 1000).toLocaleString()],
-            ["Received at",      new Date(latestSnap.received_at  * 1000).toLocaleString()],
+            ["Collected at",     new Date(latestSnap.collected_at * MS_PER_SEC).toLocaleString()],
+            ["Received at",      new Date(latestSnap.received_at  * MS_PER_SEC).toLocaleString()],
             ["Latency",          `${latencyMs} ms`],
             ["Snapshots loaded", String(tracks.length > 0 ? limit : 0)],
             ["Vehicles tracked", String(displayedVehicles.length)],
@@ -211,7 +216,7 @@ export default function TransportMap({
         <div style={{ marginBottom: "12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
             <span style={{ fontSize: "13px", color: "#333" }}>
-              {new Date(selectedTime * 1000).toLocaleString()}
+              {new Date(selectedTime * MS_PER_SEC).toLocaleString()}
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               {!isLive && (
@@ -241,8 +246,8 @@ export default function TransportMap({
             style={{ width: "100%" }}
           />
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#aaa", marginTop: "2px" }}>
-            <span>{new Date(timeRange.min * 1000).toLocaleString()}</span>
-            <span>{new Date(timeRange.max * 1000).toLocaleString()}</span>
+            <span>{new Date(timeRange.min * MS_PER_SEC).toLocaleString()}</span>
+            <span>{new Date(timeRange.max * MS_PER_SEC).toLocaleString()}</span>
           </div>
         </div>
 
