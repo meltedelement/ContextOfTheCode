@@ -23,7 +23,7 @@ export default function App() {
         <h1>Context of the Code</h1>
 
         <h2>System</h2>
-        <MetricsSection source={config.system.source} limit={config.system.snapshot_limit} />
+        <MetricsSection source={config.system.source} limit={config.system.snapshot_limit} stalenessSecs={config.ui.staleness_secs} />
 
         <h2 style={{ marginTop: "40px" }}>Transport</h2>
         <TransportMap
@@ -40,7 +40,7 @@ export default function App() {
           source={config.mobile_app.source}
           limit={config.mobile_app.snapshot_limit}
           pollInterval={config.mobile_app.poll_interval}
-          stalenessSecs={config.mobile_app.staleness_secs}
+          stalenessSecs={config.ui.staleness_secs}
         />
       </div>
     </ConfigContext.Provider>

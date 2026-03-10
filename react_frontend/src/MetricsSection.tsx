@@ -78,10 +78,11 @@ function MetricChart({ values, labels, color }: {
 
 // ── One device's data ─────────────────────────────────────────────────────────
 
-function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
+function DeviceSection({ snaps, stalenessSecs }: { snaps: Snapshot[]; stalenessSecs: number }) {
   const { ui } = useContext(ConfigContext)!;
   const latest    = snaps[snaps.length - 1];
   const latencyMs = Math.round((latest.received_at - latest.collected_at) * ui.ms_per_sec);
+  const isStale   = (Date.now() / ui.ms_per_sec - latest.collected_at) > stalenessSecs;
 
   const metricNames = useMemo(() => {
     const seen = new Set<string>();
@@ -106,12 +107,17 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
             Collected by <strong>{latest.aggregator_name || latest.aggregator_id || "–"}</strong>
           </div>
         </div>
-        <span style={{
-          fontSize: "11px", fontWeight: 600, background: "#e3edf7",
-          color: "#2563a8", borderRadius: "4px", padding: "3px 8px",
-        }}>
-          {latest.source}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "11px", fontWeight: 600, color: isStale ? "#FF9800" : "#4CAF50" }}>
+            {isStale ? "● Stale" : "● Live"}
+          </span>
+          <span style={{
+            fontSize: "11px", fontWeight: 600, background: "#e3edf7",
+            color: "#2563a8", borderRadius: "4px", padding: "3px 8px",
+          }}>
+            {latest.source}
+          </span>
+        </div>
       </div>
 
       <div style={{ padding: "16px 20px" }}>
@@ -220,12 +226,13 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
 // ── Main export ───────────────────────────────────────────────────────────────
 
 interface MetricsSectionProps {
-  source:        string;
-  limit?:        number;
-  pollInterval?: number;
+  source:         string;
+  limit?:         number;
+  pollInterval?:  number;
+  stalenessSecs?: number;
 }
 
-export default function MetricsSection({ source, limit = 50, pollInterval = 5000 }: MetricsSectionProps) {
+export default function MetricsSection({ source, limit = 50, pollInterval = 5000, stalenessSecs = 120 }: MetricsSectionProps) {
   const { ui } = useContext(ConfigContext)!;
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
 
@@ -262,7 +269,7 @@ export default function MetricsSection({ source, limit = 50, pollInterval = 5000
   return (
     <div>
       {deviceGroups.map((snaps) => (
-        <DeviceSection key={snaps[0].device_id} snaps={snaps} />
+        <DeviceSection key={snaps[0].device_id} snaps={snaps} stalenessSecs={stalenessSecs} />
       ))}
     </div>
   );

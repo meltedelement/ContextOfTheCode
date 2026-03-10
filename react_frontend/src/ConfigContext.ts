@@ -4,6 +4,7 @@ export interface FrontendConfig {
   ui: {
     api_base:              string;
     ms_per_sec:            number;
+    staleness_secs:        number;
     colours:               string[];
     colour_opacity_fill:   string;
     colour_opacity_border: string;
@@ -28,7 +29,6 @@ export interface FrontendConfig {
     source:         string;
     snapshot_limit: number;
     poll_interval:  number;
-    staleness_secs: number;
   };
 }
 

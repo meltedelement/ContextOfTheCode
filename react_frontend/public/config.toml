@@ -3,6 +3,7 @@
 [ui]
 api_base              = ""
 ms_per_sec            = 1000
+staleness_secs        = 120
 colours               = ["#2196F3", "#4CAF50", "#FF9800", "#F44336", "#9C27B0", "#00BCD4", "#FF5722", "#607D8B"]
 colour_opacity_fill   = "22"
 colour_opacity_border = "55"
@@ -27,4 +28,3 @@ zoom       = 14
 source         = "mobile_app"
 snapshot_limit = 1000
 poll_interval  = 5000
-staleness_secs = 120
