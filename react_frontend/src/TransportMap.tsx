@@ -9,6 +9,15 @@ const MS_PER_SEC = 1000;
 
 const MAP_HEIGHT = "500px";
 
+// Tracks whose most recent position is older than this (relative to the current
+// live max) are considered stale and hidden in live mode. Set to 3× the
+// collection interval to tolerate a missed cycle without ghosting old buses.
+const LIVE_STALE_SECS = 180;
+
+// If the newest snapshot is older than this, the feed is considered stale
+// (i.e. collection is not running) and the Live indicator is suppressed.
+const LIVE_FRESHNESS_SECS = 60;
+
 interface Metric {
   metric_name: string;
   metric_value: number;
@@ -18,6 +27,7 @@ interface Metric {
 interface Snapshot {
   snapshot_id:     string;
   device_id:       string;
+  vehicle_id:      string | null;
   device_name:     string;
   source:          string;
   aggregator_id:   string;
@@ -42,8 +52,7 @@ function buildVehicleTracks(snapshots: Snapshot[]): VehicleTrack[] {
     const lng = find("longitude");
     if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) continue;
 
-    const vidRaw = find("vehicle_id");
-    const id = vidRaw !== undefined ? String(Math.round(vidRaw)) : snap.snapshot_id.slice(0, 8);
+    const id = snap.vehicle_id ?? snap.snapshot_id.slice(0, 8);
 
     if (!tracks[id]) tracks[id] = { id, positions: [] };
     tracks[id].positions.push({
@@ -82,12 +91,13 @@ export default function TransportMap({
   defaultCenter = { lat: 53.3498, lng: -6.2603 },
   defaultZoom = 11,
 }: TransportMapProps) {
-  const [tracks, setTracks]             = useState<VehicleTrack[]>([]);
-  const [latestSnap, setLatestSnap]     = useState<Snapshot | null>(null);
-  const [timeRange, setTimeRange]       = useState<{ min: number; max: number } | null>(null);
-  const [selectedTime, setSelectedTime] = useState<number>(0);
-  const [isLive, setIsLive]             = useState(true);
-  const [selectedId, setSelectedId]     = useState<string | null>(null);
+  const [tracks, setTracks]               = useState<VehicleTrack[]>([]);
+  const [latestSnap, setLatestSnap]       = useState<Snapshot | null>(null);
+  const [timeRange, setTimeRange]         = useState<{ min: number; max: number } | null>(null);
+  const [selectedTime, setSelectedTime]   = useState<number>(0);
+  const [isLive, setIsLive]               = useState(true);
+  const [selectedId, setSelectedId]       = useState<string | null>(null);
+  const [snapshotCount, setSnapshotCount] = useState<number>(0);
 
   const isLiveRef = useRef(true);
 
@@ -105,6 +115,7 @@ export default function TransportMap({
       const min = Math.min(...timestamps);
       const max = Math.max(...timestamps);
 
+      setSnapshotCount(snapshots.length);
       setTracks(buildVehicleTracks(snapshots));
       setLatestSnap(snapshots[snapshots.length - 1]);
       setTimeRange({ min, max });
@@ -131,11 +142,16 @@ export default function TransportMap({
   const displayedVehicles = useMemo(() => {
     if (!timeRange) return [];
     return tracks
+      .filter((t) => {
+        if (!isLive) return true;
+        const latestPos = t.positions[t.positions.length - 1];
+        return latestPos && (selectedTime - latestPos.timestamp) <= LIVE_STALE_SECS;
+      })
       .map((t) => ({ id: t.id, pos: positionAtTime(t, selectedTime) }))
       .filter((v): v is { id: string; pos: NonNullable<ReturnType<typeof positionAtTime>> } =>
         v.pos !== null
       );
-  }, [tracks, selectedTime, timeRange]);
+  }, [tracks, selectedTime, timeRange, isLive]);
 
   if (loadError) return <p style={{ color: "red" }}>Failed to load Google Maps.</p>;
   if (!isLoaded) return <p>Loading map...</p>;
@@ -143,6 +159,7 @@ export default function TransportMap({
 
   const selected = displayedVehicles.find((v) => v.id === selectedId);
   const latencyMs = Math.round((latestSnap.received_at - latestSnap.collected_at) * MS_PER_SEC);
+  const isDataFresh = (Date.now() / MS_PER_SEC - timeRange.max) <= LIVE_FRESHNESS_SECS;
 
   return (
     <div style={{ border: "1px solid #e0e0e0", borderRadius: "10px", marginBottom: "40px", overflow: "hidden" }}>
@@ -193,7 +210,7 @@ export default function TransportMap({
             ["Collected at",     new Date(latestSnap.collected_at * MS_PER_SEC).toLocaleString()],
             ["Received at",      new Date(latestSnap.received_at  * MS_PER_SEC).toLocaleString()],
             ["Latency",          `${latencyMs} ms`],
-            ["Snapshots loaded", String(tracks.length > 0 ? limit : 0)],
+            ["Snapshots loaded", String(snapshotCount)],
             ["Vehicles tracked", String(displayedVehicles.length)],
           ] as [string, string, boolean?][]).map(([label, value, mono]) => (
             <div key={label}>
@@ -224,8 +241,8 @@ export default function TransportMap({
                   Resume Live
                 </button>
               )}
-              <span style={{ fontSize: "12px", fontWeight: isLive ? 600 : 400, color: isLive ? "#4CAF50" : "#999" }}>
-                {isLive ? "● Live" : `${displayedVehicles.length} vehicle${displayedVehicles.length !== 1 ? "s" : ""} at this time`}
+              <span style={{ fontSize: "12px", fontWeight: isLive ? 600 : 400, color: isLive && isDataFresh ? "#4CAF50" : isLive ? "#FF9800" : "#999" }}>
+                {isLive && isDataFresh ? "● Live" : isLive ? "● Stale" : `${displayedVehicles.length} vehicle${displayedVehicles.length !== 1 ? "s" : ""} at this time`}
               </span>
             </div>
           </div>

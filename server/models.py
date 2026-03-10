@@ -48,10 +48,11 @@ class Snapshot(Base):
 
     __tablename__ = "snapshots"
 
-    snapshot_id  = Column(String(36), primary_key=True)
-    device_id    = Column(String(36), ForeignKey("devices.device_id"), nullable=False)
-    collected_at = Column(Double,     nullable=False)
-    received_at  = Column(Double,     nullable=False, default=time.time)
+    snapshot_id  = Column(String(36),  primary_key=True)
+    device_id    = Column(String(36),  ForeignKey("devices.device_id"), nullable=False)
+    vehicle_id   = Column(String(255), nullable=True)
+    collected_at = Column(Double,      nullable=False)
+    received_at  = Column(Double,      nullable=False, default=time.time)
 
     device  = relationship("Device", back_populates="snapshots")
     metrics = relationship("Metric", back_populates="snapshot", cascade="all, delete-orphan")

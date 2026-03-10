@@ -134,6 +134,7 @@ def post_metrics():
 
     snapshot_id = data.get("snapshot_id")
     device_id   = data.get("device_id")
+    vehicle_id  = data.get("vehicle_id")
     timestamp   = data.get("timestamp")
     metrics     = data.get("metrics", [])
 
@@ -150,6 +151,7 @@ def post_metrics():
             snapshot = Snapshot(
                 snapshot_id=snapshot_id,
                 device_id=device_id,
+                vehicle_id=vehicle_id,
                 collected_at=timestamp,
                 received_at=time.time(),
             )
@@ -211,6 +213,7 @@ def post_metrics_batch():
             for item in data:
                 snapshot_id = item.get("snapshot_id")
                 device_id   = item.get("device_id")
+                vehicle_id  = item.get("vehicle_id")
                 timestamp   = item.get("timestamp")
                 metrics     = item.get("metrics", [])
 
@@ -230,7 +233,8 @@ def post_metrics_batch():
 
                 snapshot_rows.append({
                     "snapshot_id": snapshot_id,
-                    "device_id": device_id,
+                    "device_id":   device_id,
+                    "vehicle_id":  vehicle_id,
                     "collected_at": timestamp,
                     "received_at": now,
                 })
@@ -300,6 +304,7 @@ def get_metrics():
                 {
                     "snapshot_id":     s.snapshot_id,
                     "device_id":       s.device_id,
+                    "vehicle_id":      s.vehicle_id,
                     "device_name":     s.device.name,
                     "source":          s.device.source,
                     "aggregator_id":   s.device.aggregator_id,
