@@ -184,13 +184,13 @@ export default function TransportMap({
     }
 
     const result: { id: string; pos: { lat: number; lng: number; delay?: number } }[] = [];
-    for (const [id, snap] of byVehicle) {
-      const find = (name: string) => snap.metrics.find((m) => m.metric_name === name)?.metric_value;
+    byVehicle.forEach((snap, id) => {
+      const find = (name: string) => snap.metrics.find((m: Metric) => m.metric_name === name)?.metric_value;
       const lat = find("latitude");
       const lng = find("longitude");
-      if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) continue;
+      if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) return;
       result.push({ id, pos: { lat, lng, delay: find("arrival_delay") } });
-    }
+    });
     return result;
   }, [snapshots, selectedTime, timeRange, collectionTimes]);
 
