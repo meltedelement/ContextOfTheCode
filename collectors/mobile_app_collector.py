@@ -65,9 +65,26 @@ class MobileAppCollector(BaseDataCollector):
 			List of row dicts, or None if the query fails.
 		"""
 		try:
-			response = self._client.table("device_stats").select("*").limit(self._query_limit).execute()
+			response = (
+				self._client.table("device_stats")
+				.select("*")
+				.order("timestamp", desc=True)
+				.limit(self._query_limit)
+				.execute()
+			)
 			logger.debug("Fetched %d rows from device_stats (limit=%d)", len(response.data), self._query_limit)
-			return response.data
+			# Deduplicate: keep only the first (most recent) row per user_id.
+			# Skips rows with no user_id entirely — they have no stable identity.
+			seen: set = set()
+			deduped = []
+			for row in response.data:
+				uid = row.get("user_id")
+				if not uid or uid in seen:
+					continue
+				seen.add(uid)
+				deduped.append(row)
+			logger.debug("After dedup: %d unique users", len(deduped))
+			return deduped
 		except Exception as e:
 			logger.warning("Failed to query device_stats: %s", e)
 			return None
@@ -97,7 +114,7 @@ class MobileAppCollector(BaseDataCollector):
 
 		for row in rows:
 			# Prefer user_id; fall back to id or "unknown". Both are UUIDs so safe to use directly in metric names.
-			user_id = row.get("user_id", row.get("id", "unknown"))
+			user_id = row.get("user_id") or row.get("id") or "unknown"
 
 			# --- Battery ---
 			battery_level = row.get("battery_level")
