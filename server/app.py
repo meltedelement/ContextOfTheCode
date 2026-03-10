@@ -93,6 +93,13 @@ def post_devices():
             if not aggregator:
                 return jsonify({"error": f"Aggregator '{aggregator_id}' not found"}), 404
 
+            device = db.query(Device).filter_by(
+                aggregator_id=aggregator_id, name=name, source=source
+            ).first()
+            if device:
+                logger.info("Device '%s' (source=%s) already registered: %s", name, source, device.device_id)
+                return jsonify({"device_id": device.device_id}), 200
+
             device_id = str(uuid.uuid4())
             db.add(Device(
                 device_id=device_id,
@@ -104,6 +111,16 @@ def post_devices():
         logger.info("Registered device '%s' (source=%s) under aggregator %s: %s",
                     name, source, aggregator_id, device_id)
         return jsonify({"device_id": device_id}), 201
+
+    except IntegrityError:
+        # Race condition: another request registered the same device concurrently
+        with get_db() as db:
+            device = db.query(Device).filter_by(
+                aggregator_id=aggregator_id, name=name, source=source
+            ).first()
+            if device:
+                return jsonify({"device_id": device.device_id}), 200
+        return jsonify({"error": "Failed to register device"}), 500
 
     except Exception as e:
         logger.error("POST /devices: database error: %s", str(e))

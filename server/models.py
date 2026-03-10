@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for metrics storage."""
 
 import time
-from sqlalchemy import Column, String, Float, Double, Integer, ForeignKey, Index
+from sqlalchemy import Column, String, Float, Double, Integer, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from server.database import Base
 
@@ -35,6 +35,10 @@ class Device(Base):
 
     aggregator = relationship("Aggregator", back_populates="devices")
     snapshots  = relationship("Snapshot", back_populates="device", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("aggregator_id", "name", "source", name="uq_device_aggregator_name_source"),
+    )
 
 
 class Snapshot(Base):
