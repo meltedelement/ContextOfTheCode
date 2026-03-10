@@ -64,6 +64,13 @@ def start_command_server(port: int):
     global running, restart_requested
 
     class CommandHandler(BaseHTTPRequestHandler):
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.end_headers()
+
         def do_POST(self):
             global running, restart_requested
             if self.path == "/restart":
@@ -72,10 +79,12 @@ def start_command_server(port: int):
                 running = False
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(b'{"status": "restarting"}')
             else:
                 self.send_response(404)
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
 
         def log_message(self, format, *args):  # noqa: A002
