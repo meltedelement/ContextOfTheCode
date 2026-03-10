@@ -117,7 +117,24 @@ export default function TransportMap({
       const timestamps = snapshots.map((s) => s.collected_at);
       const min = Math.min(...timestamps);
       const max = Math.max(...timestamps);
-      const times = Array.from(new Set(timestamps)).sort((a, b) => a - b);
+
+      // Cluster timestamps into collection intervals: start a new group whenever
+      // the gap to the previous timestamp exceeds 30 s. Each group's representative
+      // is its maximum timestamp so positionAtTime (≤ check) includes all vehicles
+      // from that cycle.
+      const sorted = Array.from(new Set(timestamps)).sort((a, b) => a - b);
+      const CLUSTER_GAP_SECS = 30;
+      const times: number[] = [];
+      let groupMax = sorted[0];
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i] - sorted[i - 1] > CLUSTER_GAP_SECS) {
+          times.push(groupMax);
+          groupMax = sorted[i];
+        } else {
+          groupMax = sorted[i];
+        }
+      }
+      times.push(groupMax);
 
       setSnapshotCount(snapshots.length);
       setTracks(buildVehicleTracks(snapshots));
@@ -232,6 +249,9 @@ export default function TransportMap({
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
             <span style={{ fontSize: "13px", color: "#333" }}>
               {new Date(selectedTime * MS_PER_SEC).toLocaleString()}
+              <span style={{ fontSize: "11px", color: "#aaa", marginLeft: "8px" }}>
+                interval {selectedIndex + 1} / {collectionTimes.length}
+              </span>
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               {!isLive && (
