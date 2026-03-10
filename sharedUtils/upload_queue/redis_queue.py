@@ -142,15 +142,14 @@ class RedisUploadQueue:
         self.running = False
         self._had_transient_failures = False
 
-        if not self.api_endpoint:
-            logger.warning("No api_endpoint configured - messages will be queued but not uploaded")
-
         logger.debug("RedisUploadQueue initialized with endpoint: %s", self.api_endpoint)
 
     def start(self) -> None:
         """
         Start the queue by connecting to Redis and launching the worker thread.
         """
+        if not self.api_endpoint:
+            raise ValueError("api_endpoint must be configured before starting the queue")
         # Connect to Redis
         self.redis_client = redis.Redis(
             host=self.redis_host,
