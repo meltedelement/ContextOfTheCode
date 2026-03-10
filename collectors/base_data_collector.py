@@ -35,9 +35,10 @@ class MetricEntry(BaseModel):
 
 class SnapshotMessage(BaseModel):
     """Snapshot message sent to the server from a collector."""
-    snapshot_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp:   float = Field(default_factory=time.time)
-    device_id:   str   # Must be a server-issued UUID
+    snapshot_id: str           = Field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp:   float         = Field(default_factory=time.time)
+    device_id:   str           # Must be a server-issued UUID
+    vehicle_id:  Optional[str] = None  # Set by transport collector; None for all other sources
     metrics:     List[MetricEntry]
 
 

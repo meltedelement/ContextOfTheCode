@@ -17,6 +17,9 @@ const API_BASE = "";
 // Unix timestamps from the server are in seconds; JS Date needs milliseconds.
 const MS_PER_SEC = 1000;
 
+// If the latest snapshot for a device is older than this, it is shown as stale.
+const STALENESS_SECS = 120;
+
 const COLORS = [
   "#2196F3", "#4CAF50", "#FF9800", "#F44336",
   "#9C27B0", "#00BCD4", "#FF5722", "#607D8B",
@@ -32,6 +35,7 @@ const CHART = {
   TICK_SIZE:    10,
   LINE_TENSION: 0.2,
   POINT_RADIUS: 2,
+  HEIGHT:       "140px",
 };
 
 interface Metric {
@@ -60,28 +64,31 @@ function MetricChart({ values, labels, color }: {
   color:  string;
 }) {
   return (
-    <Line
-      data={{
-        labels,
-        datasets: [{
-          data:            values,
-          borderColor:     color,
-          backgroundColor: color + COLOR_OPACITY_FILL,
-          fill:            false,
-          tension:         CHART.LINE_TENSION,
-          pointRadius:     CHART.POINT_RADIUS,
-        }],
-      }}
-      options={{
-        responsive:  true,
-        animation:   false,
-        plugins:     { legend: { display: false } },
-        scales: {
-          x: { ticks: { maxTicksLimit: CHART.MAX_X_TICKS, font: { size: CHART.TICK_SIZE } } },
-          y: { ticks: { font: { size: CHART.TICK_SIZE } } },
-        },
-      }}
-    />
+    <div style={{ height: CHART.HEIGHT }}>
+      <Line
+        data={{
+          labels,
+          datasets: [{
+            data:            values,
+            borderColor:     color,
+            backgroundColor: color + COLOR_OPACITY_FILL,
+            fill:            false,
+            tension:         CHART.LINE_TENSION,
+            pointRadius:     CHART.POINT_RADIUS,
+          }],
+        }}
+        options={{
+          responsive:          true,
+          maintainAspectRatio: false,
+          animation:           false,
+          plugins:             { legend: { display: false } },
+          scales: {
+            x: { ticks: { maxTicksLimit: CHART.MAX_X_TICKS, font: { size: CHART.TICK_SIZE } } },
+            y: { ticks: { font: { size: CHART.TICK_SIZE } } },
+          },
+        }}
+      />
+    </div>
   );
 }
 
@@ -90,11 +97,12 @@ function MetricChart({ values, labels, color }: {
 function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
   const latest    = snaps[snaps.length - 1];
   const latencyMs = Math.round((latest.received_at - latest.collected_at) * MS_PER_SEC);
+  const isStale   = (Date.now() / MS_PER_SEC - latest.collected_at) > STALENESS_SECS;
 
   const metricNames = useMemo(() => {
     const seen = new Set<string>();
     snaps.forEach((s) => s.metrics.forEach((m) => seen.add(m.metric_name)));
-    return Array.from(seen);
+    return Array.from(seen).sort();
   }, [snaps]);
 
   return (
@@ -114,12 +122,20 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
             Collected by <strong>{latest.aggregator_name || latest.aggregator_id || "–"}</strong>
           </div>
         </div>
-        <span style={{
-          fontSize: "11px", fontWeight: 600, background: "#e3edf7",
-          color: "#2563a8", borderRadius: "4px", padding: "3px 8px",
-        }}>
-          {latest.source}
-        </span>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <span style={{
+            fontSize: "11px", fontWeight: 600,
+            color: isStale ? "#FF9800" : "#4CAF50",
+          }}>
+            {isStale ? "● Stale" : "● Live"}
+          </span>
+          <span style={{
+            fontSize: "11px", fontWeight: 600, background: "#e3edf7",
+            color: "#2563a8", borderRadius: "4px", padding: "3px 8px",
+          }}>
+            {latest.source}
+          </span>
+        </div>
       </div>
 
       <div style={{ padding: "16px 20px" }}>
@@ -197,7 +213,7 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
         </div>
 
         {/* Historical charts */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
           {metricNames.map((name, i) => {
             const values: number[] = [];
             const labels: string[] = [];
@@ -235,13 +251,16 @@ interface MetricsSectionProps {
 
 export default function MetricsSection({ source, limit = 50, pollInterval = 5000 }: MetricsSectionProps) {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [fetchError, setFetchError] = useState(false);
 
   const fetchSnapshots = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/api/metrics`, { params: { source, limit } });
       setSnapshots(res.data.snapshots);
+      setFetchError(false);
     } catch (err) {
       console.error(`Failed to fetch metrics for source "${source}":`, err);
+      setFetchError(true);
     }
   }, [source, limit]);
 
@@ -257,12 +276,13 @@ export default function MetricsSection({ source, limit = 50, pollInterval = 5000
       if (!groups[snap.device_id]) groups[snap.device_id] = [];
       groups[snap.device_id].push(snap);
     }
-    return Object.values(groups);
+    return Object.values(groups).sort((a, b) =>
+      (a[0].device_name || "").localeCompare(b[0].device_name || "")
+    );
   }, [snapshots]);
 
-  if (deviceGroups.length === 0) {
-    return <p style={{ color: "#999", fontSize: "14px" }}>No data yet for source "{source}".</p>;
-  }
+  if (fetchError)           return <p style={{ color: "red",  fontSize: "14px" }}>Failed to load data for source "{source}".</p>;
+  if (deviceGroups.length === 0) return <p style={{ color: "#999", fontSize: "14px" }}>No data yet for source "{source}".</p>;
 
   return (
     <div>

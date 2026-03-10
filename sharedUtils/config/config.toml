@@ -17,10 +17,6 @@ json_indent = 2
 schema_path = "data_model.json"
 
 [collectors]
-# Default collection interval in seconds (fallback if not specified per-collector)
-default_interval = 60
-default_collection_interval = 60
-
 # CPU sampling interval in seconds for accuracy
 cpu_sample_interval = 1.0
 
@@ -36,6 +32,9 @@ collection_interval = 10
 [transport_collector]
 # How often to collect transport metrics (seconds)
 collection_interval = 60
+
+# Timeout for outbound API requests (seconds)
+api_timeout = 10
 
 # Vehicle positions API endpoint
 api_url = "https://api.nationaltransport.ie/gtfsr/v2/Vehicles?format=json"

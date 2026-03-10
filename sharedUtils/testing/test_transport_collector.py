@@ -70,8 +70,9 @@ def mock_queue():
 def collector():
     """TransportCollector with a dummy config (collection_interval irrelevant)."""
     mock_config = MagicMock()
-    mock_config.default_interval = 30
-    with patch("collectors.transport_collector.get_collector_config", return_value=mock_config):
+    mock_config.collection_interval = 30
+    mock_config.api_timeout = 10
+    with patch("collectors.transport_collector.get_transport_collector_config", return_value=mock_config):
         c = TransportCollector(
             device_id=DEVICE_ID,
             api_url="http://fake-vehicles/",

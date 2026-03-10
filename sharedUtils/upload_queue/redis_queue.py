@@ -73,26 +73,6 @@ def _classify_error(error: str) -> str:
     return "transient"
 
 
-def _classify_error(error: str) -> str:
-    """Classify an error string from _attempt_upload as "permanent" or "transient".
-
-    Permanent: 4xx HTTP status codes, missing endpoint configuration.
-    Transient: 5xx HTTP status codes, timeouts, connection errors, unexpected errors.
-    """
-    if not error:
-        return "transient"
-    if "No api_endpoint configured" in error:
-        return "permanent"
-    if error.startswith("HTTP "):
-        try:
-            status_code = int(error.split()[1].rstrip(":"))
-            if 400 <= status_code < 500:
-                return "permanent"
-        except (IndexError, ValueError):
-            pass
-    return "transient"
-
-
 class RedisUploadQueue:
     """
     Redis-based upload queue with persistent storage and retry logic.
@@ -161,6 +141,7 @@ class RedisUploadQueue:
         self.worker_thread: Optional[threading.Thread] = None
         self.running = False
         self._had_transient_failures = False
+        self._transient_lock = threading.Lock()
 
         if not self.api_endpoint:
             logger.warning("No api_endpoint configured - messages will be queued but not uploaded")
@@ -441,16 +422,18 @@ class RedisUploadQueue:
             success, error = self._attempt_batch_upload(payloads)
 
             if success:
-                if self._had_transient_failures:
-                    self._recover_transient_failures()
-                    self._had_transient_failures = False
+                with self._transient_lock:
+                    if self._had_transient_failures:
+                        self._recover_transient_failures()
+                        self._had_transient_failures = False
                 logger.debug("Batch of %d snapshots uploaded successfully", len(envelopes))
                 return len(envelopes)
 
             # Batch failed — route each envelope individually
             failure_class = _classify_error(error)
             if failure_class == "transient":
-                self._had_transient_failures = True
+                with self._transient_lock:
+                    self._had_transient_failures = True
 
             for envelope_json, envelope in envelopes:
                 retry_count = envelope.get("retry_count", 0) + 1
@@ -542,9 +525,10 @@ class RedisUploadQueue:
             success, error = self._attempt_upload(payload_json, message_id)
 
             if success:
-                if self._had_transient_failures:
-                    self._recover_transient_failures()
-                    self._had_transient_failures = False
+                with self._transient_lock:
+                    if self._had_transient_failures:
+                        self._recover_transient_failures()
+                        self._had_transient_failures = False
                 return True
 
             # Upload failed — classify and update envelope
@@ -572,7 +556,8 @@ class RedisUploadQueue:
                 )
             elif retry_count >= self.max_retry_attempts:
                 # Transient, retries exhausted — move to failed queue
-                self._had_transient_failures = True
+                with self._transient_lock:
+                    self._had_transient_failures = True
                 self.redis_client.lpush(self.FAILED_QUEUE, json.dumps(envelope))
                 logger.error(
                     "Message %s moved to failed queue after %d attempts. Last error: %s",
@@ -580,7 +565,8 @@ class RedisUploadQueue:
                 )
             else:
                 # Transient, retries remaining — schedule deferred retry
-                self._had_transient_failures = True
+                with self._transient_lock:
+                    self._had_transient_failures = True
                 delay = self.backoff_base * (self.backoff_multiplier ** (retry_count - 1))
                 retry_at = time.time() + delay
                 self.redis_client.zadd(self.RETRY_QUEUE, {json.dumps(envelope): retry_at})

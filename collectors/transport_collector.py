@@ -16,15 +16,13 @@ import time
 import os
 from dotenv import load_dotenv
 from sharedUtils.logger.logger import get_logger
-from sharedUtils.config import get_collector_config
+from sharedUtils.config import get_transport_collector_config
 
 
 # Logger instance for this module
 logger = get_logger(__name__)
 # Source identifier for this collector type (used in message metadata)
 SOURCE_TYPE = "transport_api"
-# Timeout for API requests (in seconds)
-API_TIMEOUT = 10
 
 
 class TransportCollector(BaseDataCollector):
@@ -47,12 +45,13 @@ class TransportCollector(BaseDataCollector):
 			secondary_key (Optional[str]): Secondary key for authentication (sent as header).
 			format_param (Optional[str]): Optional format parameter for the API.
 		"""
-		config = get_collector_config()
+		transport_config = get_transport_collector_config()
 		super().__init__(
 			source=SOURCE_TYPE,
 			device_id=device_id,
-			collection_interval=config.default_interval
+			collection_interval=transport_config.collection_interval
 		)
+		self._api_timeout = transport_config.api_timeout
 		self.api_url = api_url
 		self.tripupdates_url = tripupdates_url
 		self.primary_key = primary_key
@@ -60,12 +59,16 @@ class TransportCollector(BaseDataCollector):
 		self.format_param = format_param
 		logger.debug("TransportCollector initialized for %s", api_url)
 
-	def _query_transport_api(self) -> Optional[dict]:
+	def _query_api(self, url: str, label: str) -> Optional[dict]:
 		"""
-		Query the vehicle positions API and return the response as a Python dictionary.
+		Query a transport API endpoint and return the response as a Python dictionary.
+
+		Args:
+			url:   The full URL to request.
+			label: Human-readable name for this endpoint (used in log messages).
 
 		Returns:
-			dict: Parsed JSON response from the API, or None if the request fails.
+			Parsed JSON response, or None if the request fails.
 		"""
 		headers = {}
 		if self.primary_key:
@@ -73,41 +76,16 @@ class TransportCollector(BaseDataCollector):
 		if self.secondary_key:
 			headers["X-Secondary-Key"] = self.secondary_key
 		try:
-			response = requests.get(self.api_url, headers=headers, timeout=API_TIMEOUT)
+			response = requests.get(url, headers=headers, timeout=self._api_timeout)
 			response.raise_for_status()
 			data = response.json()
-			logger.info("API returned status %s", response.status_code)
+			logger.info("%s API returned status %s", label, response.status_code)
 			return data
 		except requests.exceptions.RequestException as e:
-			logger.warning("Failed to query Transport API: %s", e)
+			logger.warning("Failed to query %s API: %s", label, e)
 			return None
 		except Exception as e:
-			logger.warning("Failed to parse Transport API response: %s", e)
-			return None
-
-	def _query_tripupdates_api(self) -> Optional[dict]:
-		"""
-		Query the TripUpdates API and return the response as a Python dictionary.
-
-		Returns:
-			dict: Parsed JSON response from the API, or None if the request fails.
-		"""
-		headers = {}
-		if self.primary_key:
-			headers["x-api-key"] = self.primary_key
-		if self.secondary_key:
-			headers["X-Secondary-Key"] = self.secondary_key
-		try:
-			response = requests.get(self.tripupdates_url, headers=headers, timeout=API_TIMEOUT)
-			response.raise_for_status()
-			data = response.json()
-			logger.info("TripUpdates API returned status %s", response.status_code)
-			return data
-		except requests.exceptions.RequestException as e:
-			logger.warning("Failed to query TripUpdates API: %s", e)
-			return None
-		except Exception as e:
-			logger.warning("Failed to parse TripUpdates API response: %s", e)
+			logger.warning("Failed to parse %s API response: %s", label, e)
 			return None
 
 	def collect_data(self) -> List[MetricEntry]:
@@ -118,8 +96,8 @@ class TransportCollector(BaseDataCollector):
 		for each vehicle with a valid position. This is the format expected by the base
 		class generate_message().
 		"""
-		vehicle_data = self._query_transport_api()
-		tripupdates_data = self._query_tripupdates_api()
+		vehicle_data     = self._query_api(self.api_url,          "Vehicles")
+		tripupdates_data = self._query_api(self.tripupdates_url,   "TripUpdates")
 
 		# Build a lookup for (trip_id, vehicle_id) -> trip_update for fast join
 		trip_update_lookup = {}
@@ -199,7 +177,7 @@ class TransportCollector(BaseDataCollector):
 		if not metrics:
 			return super().generate_message()
 
-		groups: dict = defaultdict(list)
+		groups: dict[str, list] = defaultdict(list)
 		for entry in metrics:
 			vehicle_key, _, clean_name = entry.metric_name.partition("__")
 			groups[vehicle_key].append(MetricEntry(
@@ -209,9 +187,10 @@ class TransportCollector(BaseDataCollector):
 			))
 
 		last_snapshot: Optional[SnapshotMessage] = None
-		for vehicle_metrics in groups.values():
+		for vehicle_key, vehicle_metrics in groups.items():
 			snapshot = SnapshotMessage(
 				device_id=self.device_id,
+				vehicle_id=vehicle_key,
 				metrics=vehicle_metrics,
 			)
 			self.export_to_data_model(snapshot)
@@ -250,7 +229,7 @@ if __name__ == "__main__":
 
 	try:
 		import json
-		poll_interval = get_collector_config().default_interval
+		poll_interval = get_transport_collector_config().collection_interval
 		while True:
 			message = collector.generate_message()
 			bus_count = getattr(collector, "_last_bus_count", "?")

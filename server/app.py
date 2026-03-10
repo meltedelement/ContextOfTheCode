@@ -17,7 +17,8 @@ from flask_cors import CORS
 
 logger = get_logger(__name__)
 
-DEFAULT_QUERY_LIMIT = 100  # Max snapshots returned by GET /api/metrics when no limit param is given
+DEFAULT_QUERY_LIMIT = 100   # Max snapshots returned by GET /api/metrics when no limit param is given
+MAX_BATCH_SIZE      = 500   # Hard cap on snapshots accepted per POST /api/metrics/batch
 
 app = Flask(__name__)
 CORS(app)
@@ -135,10 +136,18 @@ def post_metrics():
     snapshot_id = data.get("snapshot_id")
     device_id   = data.get("device_id")
     timestamp   = data.get("timestamp")
+    vehicle_id  = data.get("vehicle_id")
     metrics     = data.get("metrics", [])
 
     if not all([snapshot_id, device_id, timestamp is not None]):
         return jsonify({"error": "Missing required fields: snapshot_id, device_id, timestamp"}), 400
+
+    # Validate metric values before touching the DB
+    for entry in metrics:
+        try:
+            float(entry.get("metric_value", 0.0))
+        except (ValueError, TypeError):
+            return jsonify({"error": f"Invalid metric_value for metric '{entry.get('metric_name', '')}'"}), 400
 
     try:
         with get_db() as db:
@@ -150,6 +159,7 @@ def post_metrics():
             snapshot = Snapshot(
                 snapshot_id=snapshot_id,
                 device_id=device_id,
+                vehicle_id=vehicle_id,
                 collected_at=timestamp,
                 received_at=time.time(),
             )
@@ -197,6 +207,10 @@ def post_metrics_batch():
     if not data:
         return jsonify({"status": "success", "snapshots_received": 0}), 200
 
+    if len(data) > MAX_BATCH_SIZE:
+        logger.warning("POST /api/metrics/batch: batch size %d exceeds cap %d", len(data), MAX_BATCH_SIZE)
+        return jsonify({"error": f"Batch size {len(data)} exceeds maximum of {MAX_BATCH_SIZE}"}), 400
+
     try:
         with get_db() as db:
             stored = 0
@@ -204,6 +218,7 @@ def post_metrics_batch():
                 snapshot_id = item.get("snapshot_id")
                 device_id   = item.get("device_id")
                 timestamp   = item.get("timestamp")
+                vehicle_id  = item.get("vehicle_id")
                 metrics     = item.get("metrics", [])
 
                 if not all([snapshot_id, device_id, timestamp is not None]):
@@ -218,6 +233,7 @@ def post_metrics_batch():
                 snapshot = Snapshot(
                     snapshot_id=snapshot_id,
                     device_id=device_id,
+                    vehicle_id=vehicle_id,
                     collected_at=timestamp,
                     received_at=time.time(),
                 )
@@ -225,10 +241,18 @@ def post_metrics_batch():
                 db.flush()
 
                 for entry in metrics:
+                    try:
+                        value = float(entry.get("metric_value", 0.0))
+                    except (ValueError, TypeError):
+                        logger.warning(
+                            "POST /api/metrics/batch: invalid metric_value for '%s' in snapshot %s — skipping metric",
+                            entry.get("metric_name", ""), snapshot_id,
+                        )
+                        continue
                     db.add(Metric(
                         snapshot_id=snapshot_id,
                         metric_name=entry.get("metric_name", ""),
-                        metric_value=float(entry.get("metric_value", 0.0)),
+                        metric_value=value,
                         unit=entry.get("unit", ""),
                     ))
 
@@ -285,6 +309,7 @@ def get_metrics():
                 {
                     "snapshot_id":     s.snapshot_id,
                     "device_id":       s.device_id,
+                    "vehicle_id":      s.vehicle_id,
                     "device_name":     s.device.name,
                     "source":          s.device.source,
                     "aggregator_id":   s.device.aggregator_id,

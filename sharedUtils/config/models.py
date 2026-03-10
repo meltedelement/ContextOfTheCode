@@ -28,17 +28,8 @@ class DataModelConfig(BaseModel):
 
 class CollectorsConfig(BaseModel):
     """Configuration for data collectors (shared settings)."""
-    default_interval: int = Field(default=60, description="Collection interval in seconds")
-    default_collection_interval: int = Field(default=60, description="Default collection interval fallback")
     cpu_sample_interval: float = Field(default=1.0, description="CPU sampling interval in seconds")
     metric_precision: int = Field(default=1, description="Decimal precision for metrics")
-
-    @field_validator("default_interval", "default_collection_interval")
-    @classmethod
-    def validate_interval(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError("interval must be at least 1 second")
-        return v
 
     @field_validator("metric_precision")
     @classmethod
@@ -96,6 +87,7 @@ class UploadQueueConfig(BaseModel):
 class TransportCollectorConfig(BaseModel):
     """Configuration for transport API collector."""
     collection_interval: int = Field(default=60, description="Collection interval in seconds")
+    api_timeout: int = Field(default=10, description="Timeout for outbound API requests in seconds")
     api_url: str = Field(description="Transport API endpoint URL")
     tripupdates_url: str = Field(description="Trip updates API endpoint URL")
 
