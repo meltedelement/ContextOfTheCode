@@ -7,8 +7,7 @@ import uuid
 
 from flask import Flask, request, jsonify
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import asc, desc, text
-from sqlalchemy.orm import joinedload
+from sqlalchemy import text
 
 from server.database import Base, engine, get_db
 from server.models import Aggregator, Device, Snapshot, Metric
@@ -308,43 +307,61 @@ def get_metrics():
 
     try:
         with get_db() as db:
-            query = db.query(Snapshot).options(
-                joinedload(Snapshot.metrics),
-                joinedload(Snapshot.device).joinedload(Device.aggregator),
-            )
+            # Raw SQL with a subquery to apply LIMIT on snapshots before joining metrics.
+            # This avoids loading ORM objects into memory for large result sets.
+            rows = db.execute(text("""
+                SELECT
+                    s.snapshot_id, s.device_id, s.vehicle_id,
+                    s.collected_at, s.received_at,
+                    d.name        AS device_name,
+                    d.source      AS source,
+                    d.aggregator_id,
+                    a.name        AS aggregator_name,
+                    m.metric_name, m.metric_value, m.unit
+                FROM (
+                    SELECT sn.snapshot_id, sn.device_id, sn.vehicle_id,
+                           sn.collected_at, sn.received_at
+                    FROM snapshots sn
+                    JOIN devices d ON sn.device_id = d.device_id
+                    WHERE (:device_id IS NULL OR sn.device_id  = :device_id)
+                      AND (:source    IS NULL OR d.source       = :source)
+                      AND (:since     IS NULL OR sn.collected_at > :since)
+                    ORDER BY sn.collected_at DESC
+                    LIMIT :limit
+                ) s
+                JOIN devices     d ON s.device_id      = d.device_id
+                JOIN aggregators a ON d.aggregator_id  = a.aggregator_id
+                LEFT JOIN metrics m ON s.snapshot_id   = m.snapshot_id
+                ORDER BY s.collected_at ASC, s.snapshot_id, m.metric_name
+            """), {"device_id": device_id, "source": source, "since": since, "limit": limit})
 
-            if device_id:
-                query = query.filter(Snapshot.device_id == device_id)
-            if source:
-                query = query.filter(Snapshot.device.has(Device.source == source))
-            if since is not None:
-                query = query.filter(Snapshot.collected_at > since)
+            # Collapse flat rows into per-snapshot dicts
+            snapshots_map: dict = {}
+            order: list = []
+            for row in rows:
+                sid = row.snapshot_id
+                if sid not in snapshots_map:
+                    snapshots_map[sid] = {
+                        "snapshot_id":     sid,
+                        "device_id":       row.device_id,
+                        "vehicle_id":      row.vehicle_id,
+                        "device_name":     row.device_name,
+                        "source":          row.source,
+                        "aggregator_id":   row.aggregator_id,
+                        "aggregator_name": row.aggregator_name,
+                        "collected_at":    row.collected_at,
+                        "received_at":     row.received_at,
+                        "metrics":         [],
+                    }
+                    order.append(sid)
+                if row.metric_name is not None:
+                    snapshots_map[sid]["metrics"].append({
+                        "metric_name":  row.metric_name,
+                        "metric_value": row.metric_value,
+                        "unit":         row.unit,
+                    })
 
-            query = query.order_by(desc(Snapshot.collected_at)).limit(limit)
-            snapshots = list(reversed(query.all()))
-
-            result = [
-                {
-                    "snapshot_id":     s.snapshot_id,
-                    "device_id":       s.device_id,
-                    "vehicle_id":      s.vehicle_id,
-                    "device_name":     s.device.name,
-                    "source":          s.device.source,
-                    "aggregator_id":   s.device.aggregator_id,
-                    "aggregator_name": s.device.aggregator.name,
-                    "collected_at":    s.collected_at,
-                    "received_at":     s.received_at,
-                    "metrics": [
-                        {
-                            "metric_name":  m.metric_name,
-                            "metric_value": m.metric_value,
-                            "unit":         m.unit,
-                        }
-                        for m in s.metrics
-                    ],
-                }
-                for s in snapshots
-            ]
+            result = [snapshots_map[sid] for sid in order]
 
         logger.info(
             "GET /api/metrics: returned %d snapshots (device=%s, source=%s, since=%s)",
