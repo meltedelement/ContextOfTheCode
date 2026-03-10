@@ -70,10 +70,11 @@ def post_aggregators():
 @app.route('/devices', methods=['POST'])
 def post_devices():
     """
-    Register a device under an aggregator.
+    Register a device under an aggregator (idempotent).
 
     Body: {"aggregator_id": "uuid", "name": "local-system", "source": "local"}
-    Returns {"device_id": "server-generated-uuid"} with 201.
+    Returns existing device_id with 200 if (aggregator_id, name) already registered,
+    or new device_id with 201 on first registration.
     """
     data = request.get_json()
     if not data:

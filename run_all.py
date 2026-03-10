@@ -152,60 +152,63 @@ def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict
     if requests_lib is None:
         raise RuntimeError("requests package not available — cannot register")
 
-    session = requests_lib.Session()
-    session.headers.update({"Content-Type": "application/json"})
+    with requests_lib.Session() as session:
+        session.headers.update({"Content-Type": "application/json"})
 
-    # 1. Register aggregator
-    resp = session.post(f"{base_url}/aggregators", json={"name": aggregator_name}, timeout=10)
-    resp.raise_for_status()
-    aggregator_id = resp.json()["aggregator_id"]
-    logger.info("Aggregator '%s' registered: %s", aggregator_name, aggregator_id)
-
-    # 2. Register each enabled device
-    device_ids = {}
-
-    for collector_cls, get_config_fn in COLLECTOR_REGISTRY:
-        if not get_config_fn().enabled:
-            logger.info("Collector '%s' is disabled — skipping", collector_cls.__name__)
-            continue
-
-        resp = session.post(
-            f"{base_url}/devices",
-            json={
-                "aggregator_id": aggregator_id,
-                "name": collector_cls.DEVICE_NAME,
-                "source": collector_cls.SOURCE,
-            },
-            timeout=10,
-        )
+        # 1. Register aggregator
+        resp = session.post(f"{base_url}/aggregators", json={"name": aggregator_name}, timeout=10)
         resp.raise_for_status()
-        device_id = resp.json()["device_id"]
-        device_ids[collector_cls.SOURCE] = device_id
-        logger.info("Device '%s' (source=%s) registered: %s",
-                     collector_cls.DEVICE_NAME, collector_cls.SOURCE, device_id)
+        aggregator_id = resp.json()["aggregator_id"]
+        logger.info("Aggregator '%s' registered: %s", aggregator_name, aggregator_id)
 
-    # Register transport collector (handled separately as it needs env-var API keys)
-    resp = session.post(
-        f"{base_url}/devices",
-        json={"aggregator_id": aggregator_id, "name": "transport-api", "source": "transport_api"},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    device_ids["transport_api"] = resp.json()["device_id"]
-    logger.info("Device 'transport-api' (source=transport_api) registered: %s", device_ids["transport_api"])
+        # 2. Register each enabled device
+        device_ids = {}
 
-    # Register mobile app collector (only if credentials are present in .env)
-    if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
-        resp = session.post(
-            f"{base_url}/devices",
-            json={"aggregator_id": aggregator_id, "name": "mobile-app", "source": "mobile_app"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        device_ids["mobile_app"] = resp.json()["device_id"]
-        logger.info("Device 'mobile-app' (source=mobile_app) registered: %s", device_ids["mobile_app"])
+        for collector_cls, get_config_fn in COLLECTOR_REGISTRY:
+            if not get_config_fn().enabled:
+                logger.info("Collector '%s' is disabled — skipping", collector_cls.__name__)
+                continue
 
-    session.close()
+            resp = session.post(
+                f"{base_url}/devices",
+                json={
+                    "aggregator_id": aggregator_id,
+                    "name": collector_cls.DEVICE_NAME,
+                    "source": collector_cls.SOURCE,
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            device_id = resp.json()["device_id"]
+            device_ids[collector_cls.SOURCE] = device_id
+            logger.info("Device '%s' (source=%s) registered: %s",
+                         collector_cls.DEVICE_NAME, collector_cls.SOURCE, device_id)
+
+        # Register transport collector (handled separately as it needs env-var API keys)
+        config = get_typed_config()
+        if config.transport_collector.enabled:
+            resp = session.post(
+                f"{base_url}/devices",
+                json={"aggregator_id": aggregator_id, "name": "transport-api", "source": "transport_api"},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            device_ids["transport_api"] = resp.json()["device_id"]
+            logger.info("Device 'transport-api' (source=transport_api) registered: %s", device_ids["transport_api"])
+        else:
+            logger.info("TransportCollector disabled in config.toml — skipping registration")
+
+        # Register mobile app collector (only if credentials are present in .env)
+        if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
+            resp = session.post(
+                f"{base_url}/devices",
+                json={"aggregator_id": aggregator_id, "name": "mobile-app", "source": "mobile_app"},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            device_ids["mobile_app"] = resp.json()["device_id"]
+            logger.info("Device 'mobile-app' (source=mobile_app) registered: %s", device_ids["mobile_app"])
+
     return device_ids
 
 
@@ -241,7 +244,9 @@ def start_collectors(device_ids: dict):
 
     config = get_typed_config()
     device_id = device_ids.get("transport_api")
-    if not device_id:
+    if not config.transport_collector.enabled:
+        logger.info("TransportCollector disabled in config.toml — skipping")
+    elif not device_id:
         logger.error("No device_id for transport collector — skipping")
     else:
         logger.info("Initializing TransportCollector (interval=%ds)...", config.transport_collector.collection_interval)

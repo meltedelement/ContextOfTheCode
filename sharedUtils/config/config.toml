@@ -32,7 +32,9 @@ enabled = false
 collection_interval = 10
 
 [transport_collector]
+# Set to false to disable this collector
 enabled = false
+# How often to collect transport metrics (seconds)
 collection_interval = 60
 
 # Vehicle positions API endpoint
