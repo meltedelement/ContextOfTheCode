@@ -60,7 +60,7 @@ export default function App() {
           stalenessSecs={config.mobile_app.staleness_secs}
         />
 
-        <h2 style={{ marginTop: "40px" }}>Aggregators</h2>
+        <h2 style={{ marginTop: "40px" }}>Stretch Goal</h2>
         <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
           {(config.aggregators?.list ?? []).map(({ name, restart_url }) => {
             const status = restartStatus[name] ?? "idle";
