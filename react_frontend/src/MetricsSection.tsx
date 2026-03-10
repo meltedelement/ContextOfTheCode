@@ -81,17 +81,17 @@ function MetricChart({ values, labels, color }: {
 function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
   const { ui } = useContext(ConfigContext)!;
   const latest    = snaps[snaps.length - 1];
-  const [restartState, setRestartState] = useState<"idle" | "pending" | "success" | "error">("idle");
+  const [collectState, setCollectState] = useState<"idle" | "pending" | "success" | "error">("idle");
 
-  const handleRestart = async () => {
-    setRestartState("pending");
+  const handleCollect = async () => {
+    setCollectState("pending");
     try {
-      await axios.post(`${ui.command_server_url}/restart`);
-      setRestartState("success");
+      await axios.post(`${ui.command_server_url}/collect`, { source: latest.source });
+      setCollectState("success");
     } catch {
-      setRestartState("error");
+      setCollectState("error");
     }
-    setTimeout(() => setRestartState("idle"), 3000);
+    setTimeout(() => setCollectState("idle"), 3000);
   };
   const latencyMs = Math.round((latest.received_at - latest.collected_at) * ui.ms_per_sec);
 
@@ -224,20 +224,20 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
           })}
         </div>
 
-        {/* Restart button */}
+        {/* Collect now button */}
         <div style={{ marginTop: "20px", display: "flex", justifyContent: "flex-end" }}>
           <button
-            onClick={handleRestart}
-            disabled={restartState === "pending"}
+            onClick={handleCollect}
+            disabled={collectState === "pending"}
             style={{
-              fontSize: "12px", padding: "6px 14px", cursor: restartState === "pending" ? "default" : "pointer",
-              borderRadius: "4px", border: "1px solid #F44336",
-              background: restartState === "error" ? "#fdecea" : "#fff",
-              color: restartState === "error" ? "#F44336" : restartState === "success" ? "#4CAF50" : "#F44336",
+              fontSize: "12px", padding: "6px 14px", cursor: collectState === "pending" ? "default" : "pointer",
+              borderRadius: "4px", border: `1px solid ${collectState === "error" ? "#F44336" : "#4CAF50"}`,
+              background: collectState === "error" ? "#fdecea" : "#fff",
+              color: collectState === "error" ? "#F44336" : "#4CAF50",
               fontWeight: 600,
             }}
           >
-            {restartState === "pending" ? "Restarting…" : restartState === "success" ? "Restarting…" : restartState === "error" ? "Error — try again" : "Restart Collectors"}
+            {collectState === "pending" ? "Collecting…" : collectState === "success" ? "Collected!" : collectState === "error" ? "Error — try again" : "Collect Now"}
           </button>
         </div>
 

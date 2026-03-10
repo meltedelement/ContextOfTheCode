@@ -78,6 +78,7 @@ class BaseDataCollector(ABC):
         # Threading state
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._trigger_event = threading.Event()
 
         logger.debug(
             "Collector init with source=%s, device_id=%s, interval=%d",
@@ -167,11 +168,9 @@ class BaseDataCollector(ABC):
                     exc_info=True
                 )
 
-            # Sleep with interrupt checking (check every second)
-            for _ in range(self.collection_interval):
-                if not self._running:
-                    break
-                time.sleep(1)
+            # Sleep until the interval elapses or trigger_now() wakes us early
+            self._trigger_event.wait(timeout=self.collection_interval)
+            self._trigger_event.clear()
 
         logger.info("%s: Collection loop stopped", self.__class__.__name__)
 
@@ -216,6 +215,10 @@ class BaseDataCollector(ABC):
                 logger.info("%s: Stopped successfully", self.__class__.__name__)
 
         self._thread = None
+
+    def trigger_now(self) -> None:
+        """Wake up the collection loop immediately, skipping the rest of the current sleep."""
+        self._trigger_event.set()
 
     def is_running(self) -> bool:
         """Check if collector is currently running in async mode."""

@@ -52,6 +52,9 @@ SHUTDOWN_POLL_INTERVAL_SECONDS = 1  # How often the main loop checks for a stop 
 running = True
 restart_requested = False
 
+# Populated by start_collectors(); read by the command server at request time.
+_collectors_by_source: dict = {}
+
 
 def start_command_server(port: int):
     """
@@ -81,6 +84,28 @@ def start_command_server(port: int):
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(b'{"status": "restarting"}')
+            elif self.path == "/collect":
+                import json
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length)) if length else {}
+                source = body.get("source", "")
+                collector = _collectors_by_source.get(source)
+                if collector:
+                    logger.info("Immediate collect triggered for source '%s' by %s",
+                                source, self.client_address[0])
+                    collector.trigger_now()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(b'{"status": "triggered"}')
+                else:
+                    logger.warning("Collect request for unknown source '%s'", source)
+                    self.send_response(404)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(b'{"error": "unknown source"}')
             else:
                 self.send_response(404)
                 self.send_header("Access-Control-Allow-Origin", "*")
@@ -257,7 +282,7 @@ def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict
     return device_ids
 
 
-def start_collectors(device_ids: dict):
+def start_collectors(device_ids: dict):  # noqa: C901
     """
     Initialize and start all enabled collectors in async mode.
 
@@ -319,6 +344,11 @@ def start_collectors(device_ids: dict):
         collectors.append(("MobileAppCollector", mobile_collector))
     else:
         logger.info("MobileAppCollector skipped — SUPABASE_URL/SUPABASE_KEY missing")
+
+    # Expose collectors by source so the command server can trigger them on demand.
+    global _collectors_by_source
+    for _, collector in collectors:
+        _collectors_by_source[collector.source] = collector
 
     if not collectors:
         logger.warning("No collectors enabled in config.toml")
