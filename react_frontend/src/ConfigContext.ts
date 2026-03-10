@@ -23,6 +23,14 @@ export interface FrontendConfig {
       centre_lat: number;
       centre_lng: number;
       zoom:       number;
+      height_px:  number;
+    };
+    route: {
+      min_move_m:    number;
+      max_points:    number;
+      batch_size:    number;
+      stroke_weight: number;
+      stroke_opacity: number;
     };
   };
   mobile_app: {

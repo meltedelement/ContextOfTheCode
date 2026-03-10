@@ -23,6 +23,14 @@ max_snapshots  = 20000
 centre_lat = 52.6638
 centre_lng = -8.6267
 zoom       = 13
+height_px  = 500
+
+[transport.route]
+min_move_m     = 30    # deduplicate GPS pings closer than this (metres)
+max_points     = 90    # max waypoints per Roads API call (hard limit: 100)
+batch_size     = 10    # parallel Roads API calls per batch
+stroke_weight  = 3
+stroke_opacity = 0.75
 
 [mobile_app]
 source         = "mobile_app"
