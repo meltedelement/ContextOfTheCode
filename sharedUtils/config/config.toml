@@ -28,13 +28,11 @@ cpu_sample_interval = 1.0
 metric_precision = 1
 
 [local_collector]
-# Set to false to disable this collector
-# enabled = false
-# How often to collect local system metrics (seconds)
+enabled = false
 collection_interval = 10
 
 [transport_collector]
-# How often to collect transport metrics (seconds)
+enabled = false
 collection_interval = 60
 
 # Vehicle positions API endpoint
