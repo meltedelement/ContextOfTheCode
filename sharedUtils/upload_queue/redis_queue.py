@@ -73,26 +73,6 @@ def _classify_error(error: str) -> str:
     return "transient"
 
 
-def _classify_error(error: str) -> str:
-    """Classify an error string from _attempt_upload as "permanent" or "transient".
-
-    Permanent: 4xx HTTP status codes, missing endpoint configuration.
-    Transient: 5xx HTTP status codes, timeouts, connection errors, unexpected errors.
-    """
-    if not error:
-        return "transient"
-    if "No api_endpoint configured" in error:
-        return "permanent"
-    if error.startswith("HTTP "):
-        try:
-            status_code = int(error.split()[1].rstrip(":"))
-            if 400 <= status_code < 500:
-                return "permanent"
-        except (IndexError, ValueError):
-            pass
-    return "transient"
-
-
 class RedisUploadQueue:
     """
     Redis-based upload queue with persistent storage and retry logic.
