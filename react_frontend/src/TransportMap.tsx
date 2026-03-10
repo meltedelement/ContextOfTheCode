@@ -14,6 +14,10 @@ const MAP_HEIGHT = "500px";
 // collection interval to tolerate a missed cycle without ghosting old buses.
 const LIVE_STALE_SECS = 180;
 
+// If the newest snapshot is older than this, the feed is considered stale
+// (i.e. collection is not running) and the Live indicator is suppressed.
+const LIVE_FRESHNESS_SECS = 60;
+
 interface Metric {
   metric_name: string;
   metric_value: number;
@@ -154,6 +158,7 @@ export default function TransportMap({
 
   const selected = displayedVehicles.find((v) => v.id === selectedId);
   const latencyMs = Math.round((latestSnap.received_at - latestSnap.collected_at) * MS_PER_SEC);
+  const isDataFresh = (Date.now() / MS_PER_SEC - timeRange.max) <= LIVE_FRESHNESS_SECS;
 
   return (
     <div style={{ border: "1px solid #e0e0e0", borderRadius: "10px", marginBottom: "40px", overflow: "hidden" }}>
@@ -235,8 +240,8 @@ export default function TransportMap({
                   Resume Live
                 </button>
               )}
-              <span style={{ fontSize: "12px", fontWeight: isLive ? 600 : 400, color: isLive ? "#4CAF50" : "#999" }}>
-                {isLive ? "● Live" : `${displayedVehicles.length} vehicle${displayedVehicles.length !== 1 ? "s" : ""} at this time`}
+              <span style={{ fontSize: "12px", fontWeight: isLive ? 600 : 400, color: isLive && isDataFresh ? "#4CAF50" : isLive ? "#FF9800" : "#999" }}>
+                {isLive && isDataFresh ? "● Live" : isLive ? "● Stale" : `${displayedVehicles.length} vehicle${displayedVehicles.length !== 1 ? "s" : ""} at this time`}
               </span>
             </div>
           </div>
