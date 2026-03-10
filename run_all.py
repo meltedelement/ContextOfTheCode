@@ -16,7 +16,6 @@ import sys
 import time
 import signal
 import os
-import subprocess
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
@@ -451,8 +450,7 @@ def main():
 
     if restart_requested:
         logger.info("Restarting process...")
-        subprocess.Popen([sys.executable] + sys.argv)
-        sys.exit(0)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     return 0
 

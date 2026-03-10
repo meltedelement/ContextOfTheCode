@@ -3,6 +3,7 @@ import { createContext } from "react";
 export interface FrontendConfig {
   ui: {
     api_base:              string;
+    command_server_url:    string;
     ms_per_sec:            number;
     colours:               string[];
     colour_opacity_fill:   string;

@@ -2,6 +2,7 @@
 
 [ui]
 api_base              = ""
+command_server_url    = "http://100.67.157.90:5050"
 ms_per_sec            = 1000
 colours               = ["#2196F3", "#4CAF50", "#FF9800", "#F44336", "#9C27B0", "#00BCD4", "#FF5722", "#607D8B"]
 colour_opacity_fill   = "22"

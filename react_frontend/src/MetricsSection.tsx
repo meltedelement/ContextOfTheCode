@@ -81,6 +81,18 @@ function MetricChart({ values, labels, color }: {
 function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
   const { ui } = useContext(ConfigContext)!;
   const latest    = snaps[snaps.length - 1];
+  const [restartState, setRestartState] = useState<"idle" | "pending" | "success" | "error">("idle");
+
+  const handleRestart = async () => {
+    setRestartState("pending");
+    try {
+      await axios.post(`${ui.command_server_url}/restart`);
+      setRestartState("success");
+    } catch {
+      setRestartState("error");
+    }
+    setTimeout(() => setRestartState("idle"), 3000);
+  };
   const latencyMs = Math.round((latest.received_at - latest.collected_at) * ui.ms_per_sec);
 
   const metricNames = useMemo(() => {
@@ -210,6 +222,23 @@ function DeviceSection({ snaps }: { snaps: Snapshot[] }) {
               </div>
             );
           })}
+        </div>
+
+        {/* Restart button */}
+        <div style={{ marginTop: "20px", display: "flex", justifyContent: "flex-end" }}>
+          <button
+            onClick={handleRestart}
+            disabled={restartState === "pending"}
+            style={{
+              fontSize: "12px", padding: "6px 14px", cursor: restartState === "pending" ? "default" : "pointer",
+              borderRadius: "4px", border: "1px solid #F44336",
+              background: restartState === "error" ? "#fdecea" : "#fff",
+              color: restartState === "error" ? "#F44336" : restartState === "success" ? "#4CAF50" : "#F44336",
+              fontWeight: 600,
+            }}
+          >
+            {restartState === "pending" ? "Restarting…" : restartState === "success" ? "Restarting…" : restartState === "error" ? "Error — try again" : "Restart Collectors"}
+          </button>
         </div>
 
       </div>
