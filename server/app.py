@@ -7,7 +7,7 @@ import uuid
 
 from flask import Flask, request, jsonify
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import asc, desc
+from sqlalchemy import asc, desc, text
 from sqlalchemy.orm import joinedload
 
 from server.database import Base, engine, get_db
@@ -264,10 +264,16 @@ def post_metrics_batch():
                         "unit": entry.get("unit", ""),
                     })
 
-            # Two bulk inserts instead of N individual ORM adds + flushes
+            # INSERT IGNORE skips duplicate snapshot_ids (e.g. retried batches)
             if snapshot_rows:
-                db.bulk_insert_mappings(Snapshot, snapshot_rows)
-                db.bulk_insert_mappings(Metric, metric_rows)
+                db.execute(
+                    text("INSERT IGNORE INTO snapshots (snapshot_id, device_id, vehicle_id, collected_at, received_at) VALUES (:snapshot_id, :device_id, :vehicle_id, :collected_at, :received_at)"),
+                    snapshot_rows,
+                )
+                db.execute(
+                    text("INSERT IGNORE INTO metrics (snapshot_id, metric_name, metric_value, unit) VALUES (:snapshot_id, :metric_name, :metric_value, :unit)"),
+                    metric_rows,
+                )
 
         logger.info("POST /api/metrics/batch: stored %d/%d snapshots (%d metrics)",
                      len(snapshot_rows), len(data), len(metric_rows))
