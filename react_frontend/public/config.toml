@@ -20,9 +20,9 @@ initial_limit  = 20000
 max_snapshots  = 20000
 
 [transport.map]
-centre_lat = 53.3498
-centre_lng = -6.2603
-zoom       = 11
+centre_lat = 52.6638
+centre_lng = -8.6267
+zoom       = 13
 
 [mobile_app]
 source         = "mobile_app"
