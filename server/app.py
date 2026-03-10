@@ -307,9 +307,28 @@ def get_metrics():
 
     try:
         with get_db() as db:
+            # Build WHERE clauses dynamically so MySQL can use indexes.
+            # The previous IS NULL OR pattern prevented index usage, causing
+            # full table scans that degraded as the snapshots table grew.
+            where_clauses = []
+            params: dict = {"limit": limit}
+
+            if device_id:
+                where_clauses.append("sn.device_id = :device_id")
+                params["device_id"] = device_id
+            if source:
+                where_clauses.append("d.source = :source")
+                params["source"] = source
+            if since is not None:
+                where_clauses.append("sn.collected_at > :since")
+                params["since"] = since
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
             # Raw SQL with a subquery to apply LIMIT on snapshots before joining metrics.
-            # This avoids loading ORM objects into memory for large result sets.
-            rows = db.execute(text("""
+            # Subquery selects the N most recent matching snapshots (ORDER DESC + LIMIT),
+            # then the outer query re-joins and orders ASC for chronological output.
+            rows = db.execute(text(f"""
                 SELECT
                     s.snapshot_id, s.device_id, s.vehicle_id,
                     s.collected_at, s.received_at,
@@ -323,9 +342,7 @@ def get_metrics():
                            sn.collected_at, sn.received_at
                     FROM snapshots sn
                     JOIN devices d ON sn.device_id = d.device_id
-                    WHERE (:device_id IS NULL OR sn.device_id  = :device_id)
-                      AND (:source    IS NULL OR d.source       = :source)
-                      AND (:since     IS NULL OR sn.collected_at > :since)
+                    {where_sql}
                     ORDER BY sn.collected_at DESC
                     LIMIT :limit
                 ) s
@@ -333,7 +350,7 @@ def get_metrics():
                 JOIN aggregators a ON d.aggregator_id  = a.aggregator_id
                 LEFT JOIN metrics m ON s.snapshot_id   = m.snapshot_id
                 ORDER BY s.collected_at ASC, s.snapshot_id, m.metric_name
-            """), {"device_id": device_id, "source": source, "since": since, "limit": limit})
+            """), params)
 
             # Collapse flat rows into per-snapshot dicts
             snapshots_map: dict = {}
