@@ -56,5 +56,3 @@ def test_collector_basic():
 if __name__ == "__main__":
     success = test_collector_basic()
     sys.exit(0 if success else 1)
-
-        from sharedUtils.upload_queue import get_upload_queue

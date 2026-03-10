@@ -70,10 +70,11 @@ def post_aggregators():
 @app.route('/devices', methods=['POST'])
 def post_devices():
     """
-    Register a device under an aggregator.
+    Register a device under an aggregator (idempotent).
 
     Body: {"aggregator_id": "uuid", "name": "local-system", "source": "local"}
-    Returns {"device_id": "server-generated-uuid"} with 201.
+    Returns existing device_id with 200 if (aggregator_id, name) already registered,
+    or new device_id with 201 on first registration.
     """
     data = request.get_json()
     if not data:
@@ -92,12 +93,11 @@ def post_devices():
             if not aggregator:
                 return jsonify({"error": f"Aggregator '{aggregator_id}' not found"}), 404
 
-            device = db.query(Device).filter_by(
-                aggregator_id=aggregator_id, name=name, source=source
-            ).first()
-            if device:
-                logger.info("Device '%s' (source=%s) already registered: %s", name, source, device.device_id)
-                return jsonify({"device_id": device.device_id}), 200
+            existing = db.query(Device).filter_by(aggregator_id=aggregator_id, name=name).first()
+            if existing:
+                logger.info("Device '%s' already registered under aggregator %s: %s",
+                            name, aggregator_id, existing.device_id)
+                return jsonify({"device_id": existing.device_id}), 200
 
             device_id = str(uuid.uuid4())
             db.add(Device(
