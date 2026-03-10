@@ -110,8 +110,6 @@ export default function TransportMap({
       const res = await axios.get(`${API_BASE}/api/metrics`, { params: { source, limit } });
       const snapshots: Snapshot[] = res.data.snapshots;
       if (snapshots.length === 0) return;
-      console.log(`Transport: fetched ${snapshots.length} snapshots (limit=${limit})`);
-      if (snapshots.length >= limit) console.warn(`Transport snapshot limit reached (${snapshots.length}/${limit}) — oldest history may be truncated.`);
 
       const timestamps = snapshots.map((s) => s.collected_at);
       const min = Math.min(...timestamps);
