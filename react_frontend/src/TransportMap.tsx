@@ -223,7 +223,7 @@ export default function TransportMap({
       .filter((v): v is { id: string; pos: NonNullable<ReturnType<typeof positionAtTime>> } =>
         v.pos !== null
       );
-  }, [tracks, selectedTime, timeRange, isLive]);
+  }, [tracks, selectedTime, timeRange]);
 
   if (loadError) return <p style={{ color: "red" }}>Failed to load Google Maps.</p>;
   if (!isLoaded) return <p>Loading map...</p>;

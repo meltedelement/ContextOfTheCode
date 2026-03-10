@@ -16,6 +16,8 @@ export interface FrontendConfig {
   transport: {
     source:         string;
     snapshot_limit: number;
+    initial_limit:  number;
+    max_snapshots:  number;
     map: {
       centre_lat: number;
       centre_lng: number;
