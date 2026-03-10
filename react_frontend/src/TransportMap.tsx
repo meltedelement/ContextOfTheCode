@@ -15,6 +15,9 @@ const LIVE_STALE_SECS = 180;
 // (i.e. collection is not running) and the Live indicator is suppressed.
 const LIVE_FRESHNESS_SECS = 60;
 
+// Timestamps within 30 s of each other are considered one collection cycle.
+const CLUSTER_GAP_SECS = 30;
+
 interface Metric {
   metric_name: string;
   metric_value: number;
@@ -63,6 +66,23 @@ function buildVehicleTracks(snapshots: Snapshot[]): VehicleTrack[] {
   return Object.values(tracks);
 }
 
+function clusterTimestamps(timestamps: number[]): number[] {
+  const sorted = Array.from(new Set(timestamps)).sort((a, b) => a - b);
+  if (sorted.length === 0) return [];
+  const times: number[] = [];
+  let groupMax = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] - sorted[i - 1] > CLUSTER_GAP_SECS) {
+      times.push(groupMax);
+      groupMax = sorted[i];
+    } else {
+      groupMax = sorted[i];
+    }
+  }
+  times.push(groupMax);
+  return times;
+}
+
 function positionAtTime(track: VehicleTrack, time: number) {
   let best: { lat: number; lng: number; delay?: number } | null = null;
   for (const p of track.positions) {
@@ -74,6 +94,8 @@ function positionAtTime(track: VehicleTrack, time: number) {
 interface TransportMapProps {
   source: string;
   limit?: number;
+  initialLimit?: number;
+  maxSnapshots?: number;
   pollInterval?: number;
   defaultCenter?: { lat: number; lng: number };
   defaultZoom?: number;
@@ -84,6 +106,8 @@ const mapContainerStyle = { width: "100%", height: MAP_HEIGHT };
 export default function TransportMap({
   source,
   limit = 100,
+  initialLimit = 20000,
+  maxSnapshots = 30000,
   pollInterval = 30000,
   defaultCenter = { lat: 53.3498, lng: -6.2603 },
   defaultZoom = 11,
@@ -100,6 +124,7 @@ export default function TransportMap({
   const selectedTime = collectionTimes[selectedIndex] ?? 0;
 
   const isLiveRef = useRef(true);
+  const maxCollectedAtRef = useRef<number | null>(null);
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY ?? "",
@@ -107,50 +132,77 @@ export default function TransportMap({
 
   const { ui } = useContext(ConfigContext)!;
 
-  const fetchPositions = useCallback(async () => {
+  // Recompute all derived state whenever the snapshots array changes.
+  useEffect(() => {
+    if (snapshots.length === 0) return;
+    const timestamps = snapshots.map((s) => s.collected_at);
+    const min = timestamps.reduce((a, b) => Math.min(a, b));
+    const max = timestamps.reduce((a, b) => Math.max(a, b));
+    const times = clusterTimestamps(timestamps);
+    setTracks(buildVehicleTracks(snapshots));
+    setTimeRange({ min, max });
+    setSnapshotCount(snapshots.length);
+    setCollectionTimes(times);
+    if (isLiveRef.current) setSelectedIndex(times.length - 1);
+  }, [snapshots]);
+
+  const fetchInitial = useCallback(async (signal: AbortSignal) => {
     try {
-      const res = await axios.get(`${ui.api_base}/api/metrics`, { params: { source, limit } });
-      const snapshots: Snapshot[] = res.data.snapshots;
-      if (snapshots.length === 0) return;
+      const res = await axios.get(`${ui.api_base}/api/metrics`, {
+        params: { source, limit: initialLimit },
+        signal,
+      });
+      const incoming: Snapshot[] = res.data.snapshots;
+      if (incoming.length === 0) return;
 
-      const timestamps = snapshots.map((s) => s.collected_at);
-      const min = Math.min(...timestamps);
-      const max = Math.max(...timestamps);
-
-      // Cluster timestamps into collection intervals: start a new group whenever
-      // the gap to the previous timestamp exceeds 30 s. Each group's representative
-      // is its maximum timestamp so positionAtTime (≤ check) includes all vehicles
-      // from that cycle.
-      const sorted = Array.from(new Set(timestamps)).sort((a, b) => a - b);
-      const CLUSTER_GAP_SECS = 30;
-      const times: number[] = [];
-      let groupMax = sorted[0];
-      for (let i = 1; i < sorted.length; i++) {
-        if (sorted[i] - sorted[i - 1] > CLUSTER_GAP_SECS) {
-          times.push(groupMax);
-          groupMax = sorted[i];
-        } else {
-          groupMax = sorted[i];
-        }
-      }
-      times.push(groupMax);
-
-      setSnapshotCount(snapshots.length);
-      setSnapshots(snapshots);
-      setTracks(buildVehicleTracks(snapshots));
-      setTimeRange({ min, max });
-      setCollectionTimes(times);
-      if (isLiveRef.current) setSelectedIndex(times.length - 1);
-    } catch (err) {
-      console.error("Failed to fetch transport data:", err);
+      maxCollectedAtRef.current = incoming.reduce((a, b) => Math.max(a, b.collected_at), -Infinity);
+      isLiveRef.current = true;
+      setIsLive(true);
+      setSnapshots(incoming);
+    } catch (err: any) {
+      if (err?.code === "ERR_CANCELED" || err?.name === "AbortError" || err?.name === "CanceledError") return;
+      console.error("Failed to fetch initial transport data:", err);
     }
-  }, [source, limit, ui.api_base]);
+  }, [source, initialLimit, ui.api_base]);
+
+  const fetchDelta = useCallback(async (signal: AbortSignal) => {
+    if (maxCollectedAtRef.current === null) return;
+    try {
+      const res = await axios.get(`${ui.api_base}/api/metrics`, {
+        params: { source, limit, since: maxCollectedAtRef.current },
+        signal,
+      });
+      const incoming: Snapshot[] = res.data.snapshots;
+      if (incoming.length === 0) return;
+
+      const newMax = incoming.reduce((a, b) => Math.max(a, b.collected_at), -Infinity);
+      maxCollectedAtRef.current = newMax;
+
+      setSnapshots((prev) => {
+        const combined = [...prev, ...incoming];
+        return combined.length > maxSnapshots ? combined.slice(combined.length - maxSnapshots) : combined;
+      });
+    } catch (err: any) {
+      if (err?.code === "ERR_CANCELED" || err?.name === "AbortError" || err?.name === "CanceledError") return;
+      console.error("Failed to fetch transport delta:", err);
+    }
+  }, [source, limit, maxSnapshots, ui.api_base]);
 
   useEffect(() => {
-    fetchPositions();
-    const interval = setInterval(fetchPositions, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchPositions, pollInterval]);
+    setSnapshots([]);
+    setTracks([]);
+    setCollectionTimes([]);
+    setTimeRange(null);
+    maxCollectedAtRef.current = null;
+
+    const controller = new AbortController();
+    fetchInitial(controller.signal);
+    const interval = setInterval(() => fetchDelta(controller.signal), pollInterval);
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [source, initialLimit, limit, maxSnapshots, pollInterval, fetchInitial, fetchDelta]);
 
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const i = Number(e.target.value);
@@ -164,7 +216,6 @@ export default function TransportMap({
     if (!timeRange) return [];
     return tracks
       .filter((t) => {
-        if (!isLive) return true;
         const latestPos = t.positions[t.positions.length - 1];
         return latestPos && (selectedTime - latestPos.timestamp) <= LIVE_STALE_SECS;
       })

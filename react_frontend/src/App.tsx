@@ -29,6 +29,8 @@ export default function App() {
         <TransportMap
           source={config.transport.source}
           limit={config.transport.snapshot_limit}
+          initialLimit={config.transport.initial_limit}
+          maxSnapshots={config.transport.max_snapshots}
           defaultCenter={{ lat: config.transport.map.centre_lat, lng: config.transport.map.centre_lng }}
           defaultZoom={config.transport.map.zoom}
         />

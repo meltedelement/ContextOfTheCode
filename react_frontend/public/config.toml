@@ -15,6 +15,8 @@ snapshot_limit  = 5000
 [transport]
 source         = "transport_api"
 snapshot_limit = 3000
+initial_limit  = 100000
+max_snapshots  = 100000
 
 [transport.map]
 centre_lat = 53.3498
