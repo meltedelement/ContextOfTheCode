@@ -187,6 +187,9 @@ def post_metrics_batch():
 
     Expects a JSON array of SnapshotMessage objects (same schema as POST /api/metrics).
     Items with unknown device_ids or missing fields are skipped; the rest are stored.
+
+    Uses bulk_insert_mappings to insert all rows in two bulk operations (snapshots + metrics)
+    instead of individual ORM inserts, and caches device lookups to avoid repeated SELECTs.
     """
     data = request.get_json()
 
@@ -199,7 +202,12 @@ def post_metrics_batch():
 
     try:
         with get_db() as db:
-            stored = 0
+            # Cache device lookups — avoids repeated SELECTs for the same device_id
+            known_devices: dict[str, bool] = {}
+            snapshot_rows = []
+            metric_rows = []
+            now = time.time()
+
             for item in data:
                 snapshot_id = item.get("snapshot_id")
                 device_id   = item.get("device_id")
@@ -210,32 +218,39 @@ def post_metrics_batch():
                     logger.warning("POST /api/metrics/batch: skipping malformed item (missing fields)")
                     continue
 
-                device = db.query(Device).filter_by(device_id=device_id).first()
-                if not device:
-                    logger.warning("POST /api/metrics/batch: unknown device_id=%s", device_id)
+                # Check device existence, hitting the DB only once per unique device_id
+                if device_id not in known_devices:
+                    device = db.query(Device).filter_by(device_id=device_id).first()
+                    known_devices[device_id] = device is not None
+                    if not device:
+                        logger.warning("POST /api/metrics/batch: unknown device_id=%s", device_id)
+
+                if not known_devices[device_id]:
                     continue
 
-                snapshot = Snapshot(
-                    snapshot_id=snapshot_id,
-                    device_id=device_id,
-                    collected_at=timestamp,
-                    received_at=time.time(),
-                )
-                db.add(snapshot)
-                db.flush()
+                snapshot_rows.append({
+                    "snapshot_id": snapshot_id,
+                    "device_id": device_id,
+                    "collected_at": timestamp,
+                    "received_at": now,
+                })
 
                 for entry in metrics:
-                    db.add(Metric(
-                        snapshot_id=snapshot_id,
-                        metric_name=entry.get("metric_name", ""),
-                        metric_value=float(entry.get("metric_value", 0.0)),
-                        unit=entry.get("unit", ""),
-                    ))
+                    metric_rows.append({
+                        "snapshot_id": snapshot_id,
+                        "metric_name": entry.get("metric_name", ""),
+                        "metric_value": float(entry.get("metric_value", 0.0)),
+                        "unit": entry.get("unit", ""),
+                    })
 
-                stored += 1
+            # Two bulk inserts instead of N individual ORM adds + flushes
+            if snapshot_rows:
+                db.bulk_insert_mappings(Snapshot, snapshot_rows)
+                db.bulk_insert_mappings(Metric, metric_rows)
 
-        logger.info("POST /api/metrics/batch: stored %d/%d snapshots", stored, len(data))
-        return jsonify({"status": "success", "snapshots_received": stored}), 201
+        logger.info("POST /api/metrics/batch: stored %d/%d snapshots (%d metrics)",
+                     len(snapshot_rows), len(data), len(metric_rows))
+        return jsonify({"status": "success", "snapshots_received": len(snapshot_rows)}), 201
 
     except Exception as e:
         logger.error("POST /api/metrics/batch: database error: %s", str(e))
