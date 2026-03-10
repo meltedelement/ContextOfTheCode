@@ -92,7 +92,7 @@ export default function TransportMap({
   defaultZoom = 11,
 }: TransportMapProps) {
   const [tracks, setTracks]               = useState<VehicleTrack[]>([]);
-  const [latestSnap, setLatestSnap]       = useState<Snapshot | null>(null);
+  const [snapshots, setSnapshots]         = useState<Snapshot[]>([]);
   const [timeRange, setTimeRange]         = useState<{ min: number; max: number } | null>(null);
   const [collectionTimes, setCollectionTimes] = useState<number[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
@@ -137,8 +137,8 @@ export default function TransportMap({
       times.push(groupMax);
 
       setSnapshotCount(snapshots.length);
+      setSnapshots(snapshots);
       setTracks(buildVehicleTracks(snapshots));
-      setLatestSnap(snapshots[snapshots.length - 1]);
       setTimeRange({ min, max });
       setCollectionTimes(times);
       if (isLiveRef.current) setSelectedIndex(times.length - 1);
@@ -177,10 +177,14 @@ export default function TransportMap({
 
   if (loadError) return <p style={{ color: "red" }}>Failed to load Google Maps.</p>;
   if (!isLoaded) return <p>Loading map...</p>;
-  if (!timeRange || !latestSnap) return <p style={{ color: "#999", fontSize: "14px" }}>No data yet for source "{source}".</p>;
+  if (!timeRange || snapshots.length === 0) return <p style={{ color: "#999", fontSize: "14px" }}>No data yet for source "{source}".</p>;
+
+  // Pick the most recent snapshot at or before the selected interval time.
+  const selectedSnap = snapshots.filter((s) => s.collected_at <= selectedTime).at(-1)
+    ?? snapshots[snapshots.length - 1];
 
   const selected = displayedVehicles.find((v) => v.id === selectedId);
-  const latencyMs = Math.round((latestSnap.received_at - latestSnap.collected_at) * MS_PER_SEC);
+  const latencyMs = Math.round((selectedSnap.received_at - selectedSnap.collected_at) * MS_PER_SEC);
   const isDataFresh = (Date.now() / MS_PER_SEC - timeRange.max) <= LIVE_FRESHNESS_SECS;
 
   return (
@@ -199,10 +203,10 @@ export default function TransportMap({
       }}>
         <div>
           <div style={{ fontSize: "17px", fontWeight: 700, color: "#1a1a1a" }}>
-            {latestSnap.device_name || "–"}
+            {selectedSnap.device_name || "–"}
           </div>
           <div style={{ fontSize: "12px", color: "#666", marginTop: "2px" }}>
-            Collected by <strong>{latestSnap.aggregator_name || latestSnap.aggregator_id || "–"}</strong>
+            Collected by <strong>{selectedSnap.aggregator_name || selectedSnap.aggregator_id || "–"}</strong>
           </div>
         </div>
         <span style={{
@@ -210,7 +214,7 @@ export default function TransportMap({
           background: "#e3edf7", color: "#2563a8",
           borderRadius: "4px", padding: "3px 8px", letterSpacing: "0.3px",
         }}>
-          {latestSnap.source}
+          {selectedSnap.source}
         </span>
       </div>
 
@@ -226,11 +230,11 @@ export default function TransportMap({
           color: "#555",
         }}>
           {([
-            ["Device ID",        latestSnap.device_id,       true],
-            ["Aggregator ID",    latestSnap.aggregator_id,   true],
-            ["Snapshot ID",      latestSnap.snapshot_id,     true],
-            ["Collected at",     new Date(latestSnap.collected_at * MS_PER_SEC).toLocaleString()],
-            ["Received at",      new Date(latestSnap.received_at  * MS_PER_SEC).toLocaleString()],
+            ["Device ID",        selectedSnap.device_id,       true],
+            ["Aggregator ID",    selectedSnap.aggregator_id,   true],
+            ["Snapshot ID",      selectedSnap.snapshot_id,     true],
+            ["Collected at",     new Date(selectedSnap.collected_at * MS_PER_SEC).toLocaleString()],
+            ["Received at",      new Date(selectedSnap.received_at  * MS_PER_SEC).toLocaleString()],
             ["Latency",          `${latencyMs} ms`],
             ["Snapshots loaded", String(snapshotCount)],
             ["Vehicles tracked", String(displayedVehicles.length)],
