@@ -91,12 +91,13 @@ export default function TransportMap({
   defaultCenter = { lat: 53.3498, lng: -6.2603 },
   defaultZoom = 11,
 }: TransportMapProps) {
-  const [tracks, setTracks]             = useState<VehicleTrack[]>([]);
-  const [latestSnap, setLatestSnap]     = useState<Snapshot | null>(null);
-  const [timeRange, setTimeRange]       = useState<{ min: number; max: number } | null>(null);
-  const [selectedTime, setSelectedTime] = useState<number>(0);
-  const [isLive, setIsLive]             = useState(true);
-  const [selectedId, setSelectedId]     = useState<string | null>(null);
+  const [tracks, setTracks]               = useState<VehicleTrack[]>([]);
+  const [latestSnap, setLatestSnap]       = useState<Snapshot | null>(null);
+  const [timeRange, setTimeRange]         = useState<{ min: number; max: number } | null>(null);
+  const [selectedTime, setSelectedTime]   = useState<number>(0);
+  const [isLive, setIsLive]               = useState(true);
+  const [selectedId, setSelectedId]       = useState<string | null>(null);
+  const [snapshotCount, setSnapshotCount] = useState<number>(0);
 
   const isLiveRef = useRef(true);
 
@@ -109,12 +110,14 @@ export default function TransportMap({
       const res = await axios.get(`${API_BASE}/api/metrics`, { params: { source, limit } });
       const snapshots: Snapshot[] = res.data.snapshots;
       if (snapshots.length === 0) return;
+      console.log(`Transport: fetched ${snapshots.length} snapshots (limit=${limit})`);
       if (snapshots.length >= limit) console.warn(`Transport snapshot limit reached (${snapshots.length}/${limit}) — oldest history may be truncated.`);
 
       const timestamps = snapshots.map((s) => s.collected_at);
       const min = Math.min(...timestamps);
       const max = Math.max(...timestamps);
 
+      setSnapshotCount(snapshots.length);
       setTracks(buildVehicleTracks(snapshots));
       setLatestSnap(snapshots[snapshots.length - 1]);
       setTimeRange({ min, max });
@@ -209,7 +212,7 @@ export default function TransportMap({
             ["Collected at",     new Date(latestSnap.collected_at * MS_PER_SEC).toLocaleString()],
             ["Received at",      new Date(latestSnap.received_at  * MS_PER_SEC).toLocaleString()],
             ["Latency",          `${latencyMs} ms`],
-            ["Snapshots loaded", String(tracks.length > 0 ? limit : 0)],
+            ["Snapshots loaded", String(snapshotCount)],
             ["Vehicles tracked", String(displayedVehicles.length)],
           ] as [string, string, boolean?][]).map(([label, value, mono]) => (
             <div key={label}>
