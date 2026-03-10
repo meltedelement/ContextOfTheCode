@@ -12,6 +12,7 @@ from sharedUtils.upload_queue.manager import get_upload_queue
 logger = get_logger(__name__)
 
 THREAD_SHUTDOWN_GRACE_SECONDS = 5  # Extra seconds beyond collection_interval to wait for thread stop
+BACKPRESSURE_THRESHOLD = 5000     # Skip collection cycle if pending queue exceeds this depth
 
 
 class MetricEntry(BaseModel):
@@ -140,14 +141,23 @@ class BaseDataCollector(ABC):
 
         while self._running:
             try:
-                # Collect and queue data
-                message = self.generate_message()
-                logger.debug(
-                    "%s: Collected %d metrics (snapshot_id=%s)",
-                    self.__class__.__name__,
-                    len(message.metrics),
-                    message.snapshot_id[:8] + "..."
-                )
+                # Backpressure: skip this cycle if the queue is too backed up
+                queue = get_upload_queue()
+                pending = queue.get_stats().get("pending", 0)
+                if pending > BACKPRESSURE_THRESHOLD:
+                    logger.warning(
+                        "%s: Skipping collection cycle — queue backpressure (%d pending > %d threshold)",
+                        self.__class__.__name__, pending, BACKPRESSURE_THRESHOLD
+                    )
+                else:
+                    # Collect and queue data
+                    message = self.generate_message()
+                    logger.debug(
+                        "%s: Collected %d metrics (snapshot_id=%s)",
+                        self.__class__.__name__,
+                        len(message.metrics),
+                        message.snapshot_id[:8] + "..."
+                    )
 
             except Exception as e:
                 logger.error(

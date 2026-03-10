@@ -74,8 +74,8 @@ registration_base_url = "http://100.67.157.90:5000"
 max_retry_attempts = 5
 backoff_base = 1              # Base delay in seconds (1s, 2s, 4s, 8s, 16s with multiplier=2)
 backoff_multiplier = 2        # Exponential backoff multiplier
-timeout = 10                  # HTTP request timeout in seconds
+timeout = 30                  # HTTP request timeout in seconds
 
 # Worker settings
 worker_sleep = 1              # Sleep time in seconds when queue is empty
-batch_size = 50               # Snapshots per batch POST to /api/metrics/batch
+batch_size = 500              # Snapshots per batch POST to /api/metrics/batch
