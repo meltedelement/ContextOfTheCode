@@ -38,6 +38,7 @@ interface Snapshot {
 }
 
 interface LatLng { lat: number; lng: number; }
+interface SnappedPoint extends LatLng { originalIndex?: number; }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -91,12 +92,13 @@ function evenlyDownsample(pts: LatLng[], maxN: number): LatLng[] {
  * Handles chunking automatically (API limit: 100 points/request).
  * Falls back to raw points if the request fails.
  */
-async function snapToRoads(pts: LatLng[], apiKey: string): Promise<LatLng[]> {
+async function snapToRoads(pts: LatLng[], apiKey: string): Promise<SnappedPoint[]> {
   const CHUNK  = 100;
-  const result: LatLng[] = [];
+  const result: SnappedPoint[] = [];
 
   for (let i = 0; i < pts.length; i += CHUNK) {
     const chunk = pts.slice(i, i + CHUNK);
+    const chunkOffset = i; // offset so originalIndex is global, not per-chunk
     const path  = chunk.map(p => `${p.lat},${p.lng}`).join("|");
     try {
       const res  = await fetch(
@@ -108,15 +110,18 @@ async function snapToRoads(pts: LatLng[], apiKey: string): Promise<LatLng[]> {
           ...data.snappedPoints.map((sp: any) => ({
             lat: sp.location.latitude,
             lng: sp.location.longitude,
+            ...(sp.originalIndex !== undefined
+              ? { originalIndex: sp.originalIndex + chunkOffset }
+              : {}),
           })),
         );
       } else {
         console.warn("snapToRoads: empty response", data);
-        result.push(...chunk);
+        result.push(...chunk.map((p, j) => ({ ...p, originalIndex: chunkOffset + j })));
       }
     } catch (err) {
       console.warn("snapToRoads: request failed", err);
-      result.push(...chunk);
+      result.push(...chunk.map((p, j) => ({ ...p, originalIndex: chunkOffset + j })));
     }
   }
 
@@ -153,7 +158,7 @@ export default function TransportMap({
   const [isLive, setIsLive]                   = useState(true);
   const [selectedId, setSelectedId]           = useState<string | null>(null);
   const [snapshotCount, setSnapshotCount]     = useState<number>(0);
-  const [vehicleRoutes, setVehicleRoutes]     = useState<Map<string, LatLng[]>>(new Map());
+  const [vehicleRoutes, setVehicleRoutes]     = useState<Map<string, SnappedPoint[]>>(new Map());
   const [routesLoading, setRoutesLoading]     = useState(false);
 
   const selectedTime = collectionTimes[selectedIndex] ?? 0;
@@ -161,6 +166,8 @@ export default function TransportMap({
   const isLiveRef           = useRef(true);
   const maxCollectedAtRef   = useRef<number | null>(null);
   const routePointCounts    = useRef<Map<string, number>>(new Map());
+  /** Per-vehicle sorted timestamps matching the raw input points fed to snapToRoads */
+  const vehicleRawTimestamps = useRef<Map<string, number[]>>(new Map());
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY ?? "",
@@ -201,7 +208,7 @@ export default function TransportMap({
     byVehicle.forEach((pts) => pts.sort((a, b) => a.t - b.t));
 
     // Only process vehicles that have new or more points since last snap
-    const toProcess: Array<[string, LatLng[], number]> = [];
+    const toProcess: Array<[string, LatLng[], number, number[]]> = [];
     byVehicle.forEach((rawPts, id) => {
       if (rawPts.length < 2) return;
       const prevCount = routePointCounts.current.get(id) ?? 0;
@@ -209,7 +216,9 @@ export default function TransportMap({
       const deduped = deduplicateByDistance(rawPts, ROUTE_MIN_MOVE_M);
       if (deduped.length < 2) return;
       const sampled = evenlyDownsample(deduped, ROUTE_MAX_POINTS);
-      toProcess.push([id, sampled, rawPts.length]);
+      // Extract timestamps for the sampled points (they're a subset of rawPts, same refs)
+      const sampledTimestamps = (sampled as Array<LatLng & { t: number }>).map(p => p.t);
+      toProcess.push([id, sampled, rawPts.length, sampledTimestamps]);
     });
 
     if (toProcess.length === 0) return;
@@ -222,15 +231,16 @@ export default function TransportMap({
     setRoutesLoading(true);
 
     (async () => {
-      const updates = new Map<string, LatLng[]>();
+      const updates = new Map<string, SnappedPoint[]>();
 
       for (let i = 0; i < capped.length; i += ROUTE_BATCH_SIZE) {
         if (cancelled) break;
         const batch = capped.slice(i, i + ROUTE_BATCH_SIZE);
         await Promise.all(
-          batch.map(async ([id, pts, rawCount]) => {
+          batch.map(async ([id, pts, rawCount, timestamps]) => {
             const snapped = await snapToRoads(pts, apiKey);
             routePointCounts.current.set(id, rawCount);
+            vehicleRawTimestamps.current.set(id, timestamps as number[]);
             updates.set(id, snapped);
           }),
         );
@@ -295,6 +305,7 @@ export default function TransportMap({
     setTimeRange(null);
     setVehicleRoutes(new Map());
     routePointCounts.current = new Map();
+    vehicleRawTimestamps.current = new Map();
     maxCollectedAtRef.current = null;
 
     const controller = new AbortController();
@@ -354,6 +365,48 @@ export default function TransportMap({
     });
     return map;
   }, [vehicleRoutes, displayedVehicles, ui.colours]);
+
+  // ── Clip routes to selectedTime when viewing history ──
+  const displayedRoutes = useMemo(() => {
+    if (isLive) return vehicleRoutes; // live → show full route
+
+    const clipped = new Map<string, LatLng[]>();
+    vehicleRoutes.forEach((snapped, id) => {
+      const timestamps = vehicleRawTimestamps.current.get(id);
+      if (!timestamps || timestamps.length === 0) {
+        clipped.set(id, snapped);
+        return;
+      }
+
+      // Find the last raw input point whose timestamp ≤ selectedTime
+      let lastRawIdx = -1;
+      for (let i = 0; i < timestamps.length; i++) {
+        if (timestamps[i] <= selectedTime) lastRawIdx = i;
+        else break;
+      }
+      if (lastRawIdx < 0) return; // no points at or before selectedTime → hide route
+
+      // Find the last snapped point whose originalIndex ≤ lastRawIdx.
+      // Interpolated points (no originalIndex) between in-range originals are
+      // included by the slice; interpolated points after the cutoff are excluded.
+      let cutoffSnappedIdx = -1;
+      for (let i = 0; i < snapped.length; i++) {
+        const oi = snapped[i].originalIndex;
+        if (oi !== undefined) {
+          if (oi <= lastRawIdx) {
+            cutoffSnappedIdx = i;
+          } else {
+            break;
+          }
+        }
+      }
+
+      if (cutoffSnappedIdx >= 0) {
+        clipped.set(id, snapped.slice(0, cutoffSnappedIdx + 1));
+      }
+    });
+    return clipped;
+  }, [isLive, vehicleRoutes, selectedTime]);
 
   // ── Guards ──
   if (loadError)  return <p style={{ color: "red" }}>Failed to load Google Maps.</p>;
@@ -480,7 +533,7 @@ export default function TransportMap({
         <GoogleMap mapContainerStyle={mapContainerStyle} center={defaultCenter} zoom={defaultZoom}>
 
           {/* Road-snapped route polylines (rendered under markers) */}
-          {Array.from(vehicleRoutes.entries()).map(([id, path]) => (
+          {Array.from(displayedRoutes.entries()).map(([id, path]) => (
             <Polyline
               key={`route-${id}`}
               path={path}
