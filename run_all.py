@@ -185,14 +185,18 @@ def register_aggregator_and_devices(base_url: str, aggregator_name: str) -> dict
                          collector_cls.DEVICE_NAME, collector_cls.SOURCE, device_id)
 
         # Register transport collector (handled separately as it needs env-var API keys)
-        resp = session.post(
-            f"{base_url}/devices",
-            json={"aggregator_id": aggregator_id, "name": "transport-api", "source": "transport_api"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        device_ids["transport_api"] = resp.json()["device_id"]
-        logger.info("Device 'transport-api' (source=transport_api) registered: %s", device_ids["transport_api"])
+        config = get_typed_config()
+        if config.transport_collector.enabled:
+            resp = session.post(
+                f"{base_url}/devices",
+                json={"aggregator_id": aggregator_id, "name": "transport-api", "source": "transport_api"},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            device_ids["transport_api"] = resp.json()["device_id"]
+            logger.info("Device 'transport-api' (source=transport_api) registered: %s", device_ids["transport_api"])
+        else:
+            logger.info("TransportCollector disabled in config.toml — skipping registration")
 
         # Register mobile app collector (only if credentials are present in .env)
         if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
@@ -240,7 +244,9 @@ def start_collectors(device_ids: dict):
 
     config = get_typed_config()
     device_id = device_ids.get("transport_api")
-    if not device_id:
+    if not config.transport_collector.enabled:
+        logger.info("TransportCollector disabled in config.toml — skipping")
+    elif not device_id:
         logger.error("No device_id for transport collector — skipping")
     else:
         logger.info("Initializing TransportCollector (interval=%ds)...", config.transport_collector.collection_interval)
