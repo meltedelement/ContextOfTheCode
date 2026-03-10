@@ -6,11 +6,6 @@ import { ConfigContext } from "./ConfigContext";
 
 const MAP_HEIGHT = "500px";
 
-// Tracks whose most recent position is older than this (relative to the current
-// live max) are considered stale and hidden in live mode. Set to 3× the
-// collection interval to tolerate a missed cycle without ghosting old buses.
-const LIVE_STALE_SECS = 180;
-
 // If the newest snapshot is older than this, the feed is considered stale
 // (i.e. collection is not running) and the Live indicator is suppressed.
 const LIVE_FRESHNESS_SECS = 60;
@@ -37,35 +32,6 @@ interface Snapshot {
   metrics:         Metric[];
 }
 
-interface VehicleTrack {
-  id: string;
-  positions: Array<{ lat: number; lng: number; timestamp: number; delay?: number }>;
-}
-
-function buildVehicleTracks(snapshots: Snapshot[]): VehicleTrack[] {
-  const tracks: Record<string, VehicleTrack> = {};
-
-  for (const snap of snapshots) {
-    const find = (name: string) => snap.metrics.find((m) => m.metric_name === name)?.metric_value;
-
-    const lat = find("latitude");
-    const lng = find("longitude");
-    if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) continue;
-
-    const id = snap.vehicle_id ?? snap.snapshot_id.slice(0, 8);
-
-    if (!tracks[id]) tracks[id] = { id, positions: [] };
-    tracks[id].positions.push({
-      lat,
-      lng,
-      timestamp: snap.collected_at,
-      delay: find("arrival_delay"),
-    });
-  }
-
-  return Object.values(tracks);
-}
-
 function clusterTimestamps(timestamps: number[]): number[] {
   const sorted = Array.from(new Set(timestamps)).sort((a, b) => a - b);
   if (sorted.length === 0) return [];
@@ -81,14 +47,6 @@ function clusterTimestamps(timestamps: number[]): number[] {
   }
   times.push(groupMax);
   return times;
-}
-
-function positionAtTime(track: VehicleTrack, time: number) {
-  let best: { lat: number; lng: number; delay?: number } | null = null;
-  for (const p of track.positions) {
-    if (p.timestamp <= time) best = p;
-  }
-  return best;
 }
 
 interface TransportMapProps {
@@ -112,7 +70,6 @@ export default function TransportMap({
   defaultCenter = { lat: 53.3498, lng: -6.2603 },
   defaultZoom = 11,
 }: TransportMapProps) {
-  const [tracks, setTracks]               = useState<VehicleTrack[]>([]);
   const [snapshots, setSnapshots]         = useState<Snapshot[]>([]);
   const [timeRange, setTimeRange]         = useState<{ min: number; max: number } | null>(null);
   const [collectionTimes, setCollectionTimes] = useState<number[]>([]);
@@ -139,7 +96,6 @@ export default function TransportMap({
     const min = timestamps.reduce((a, b) => Math.min(a, b));
     const max = timestamps.reduce((a, b) => Math.max(a, b));
     const times = clusterTimestamps(timestamps);
-    setTracks(buildVehicleTracks(snapshots));
     setTimeRange({ min, max });
     setSnapshotCount(snapshots.length);
     setCollectionTimes(times);
@@ -190,7 +146,6 @@ export default function TransportMap({
 
   useEffect(() => {
     setSnapshots([]);
-    setTracks([]);
     setCollectionTimes([]);
     setTimeRange(null);
     maxCollectedAtRef.current = null;
@@ -213,17 +168,31 @@ export default function TransportMap({
   };
 
   const displayedVehicles = useMemo(() => {
-    if (!timeRange) return [];
-    return tracks
-      .filter((t) => {
-        const latestPos = t.positions[t.positions.length - 1];
-        return latestPos && (selectedTime - latestPos.timestamp) <= LIVE_STALE_SECS;
-      })
-      .map((t) => ({ id: t.id, pos: positionAtTime(t, selectedTime) }))
-      .filter((v): v is { id: string; pos: NonNullable<ReturnType<typeof positionAtTime>> } =>
-        v.pos !== null
-      );
-  }, [tracks, selectedTime, timeRange]);
+    if (!timeRange || collectionTimes.length === 0) return [];
+
+    // Only snapshots belonging to the selected interval cluster
+    const intervalSnaps = snapshots.filter(
+      (s) => Math.abs(s.collected_at - selectedTime) <= CLUSTER_GAP_SECS
+    );
+
+    // Deduplicate by vehicle id, keeping the latest snapshot per vehicle
+    const byVehicle = new Map<string, Snapshot>();
+    for (const snap of intervalSnaps) {
+      const id = snap.vehicle_id ?? snap.snapshot_id.slice(0, 8);
+      const existing = byVehicle.get(id);
+      if (!existing || snap.collected_at > existing.collected_at) byVehicle.set(id, snap);
+    }
+
+    const result: { id: string; pos: { lat: number; lng: number; delay?: number } }[] = [];
+    for (const [id, snap] of byVehicle) {
+      const find = (name: string) => snap.metrics.find((m) => m.metric_name === name)?.metric_value;
+      const lat = find("latitude");
+      const lng = find("longitude");
+      if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) continue;
+      result.push({ id, pos: { lat, lng, delay: find("arrival_delay") } });
+    }
+    return result;
+  }, [snapshots, selectedTime, timeRange, collectionTimes]);
 
   if (loadError) return <p style={{ color: "red" }}>Failed to load Google Maps.</p>;
   if (!isLoaded) return <p>Loading map...</p>;
@@ -233,7 +202,7 @@ export default function TransportMap({
   const selectedSnap = snapshots.filter((s) => s.collected_at <= selectedTime).at(-1)
     ?? snapshots[snapshots.length - 1];
 
-  const selected = displayedVehicles.find((v) => v.id === selectedId);
+  const selected = displayedVehicles.find((v) => v.id === selectedId) ?? null;
   const latencyMs = Math.round((selectedSnap.received_at - selectedSnap.collected_at) * ui.ms_per_sec);
   const isDataFresh = (Date.now() / ui.ms_per_sec - timeRange.max) <= LIVE_FRESHNESS_SECS;
 
