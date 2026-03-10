@@ -66,28 +66,48 @@ def start_command_server(port: int):
     global running, restart_requested
 
     class CommandHandler(BaseHTTPRequestHandler):
+        def _cors(self):
+            self.send_header("Access-Control-Allow-Origin", "*")
+
+        def send_error(self, code, message=None, explain=None):
+            """Override to ensure CORS header is present even on error responses."""
+            self.send_response(code)
+            self._cors()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error": "server error"}')
+
         def do_OPTIONS(self):
             self.send_response(204)
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self._cors()
             self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.end_headers()
 
         def do_POST(self):
+            import json
             global running, restart_requested
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except Exception:
+                self.send_response(400)
+                self._cors()
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error": "bad request"}')
+                return
+
             if self.path == "/restart":
                 logger.info("Restart command received from %s", self.client_address[0])
                 restart_requested = True
                 running = False
                 self.send_response(200)
+                self._cors()
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(b'{"status": "restarting"}')
             elif self.path == "/collect":
-                import json
-                length = int(self.headers.get("Content-Length", 0))
-                body = json.loads(self.rfile.read(length)) if length else {}
                 source = body.get("source", "")
                 collector = _collectors_by_source.get(source)
                 if collector:
@@ -95,20 +115,20 @@ def start_command_server(port: int):
                                 source, self.client_address[0])
                     collector.trigger_now()
                     self.send_response(200)
+                    self._cors()
                     self.send_header("Content-Type", "application/json")
-                    self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(b'{"status": "triggered"}')
                 else:
                     logger.warning("Collect request for unknown source '%s'", source)
                     self.send_response(404)
+                    self._cors()
                     self.send_header("Content-Type", "application/json")
-                    self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(b'{"error": "unknown source"}')
             else:
                 self.send_response(404)
-                self.send_header("Access-Control-Allow-Origin", "*")
+                self._cors()
                 self.end_headers()
 
         def log_message(self, format, *args):  # noqa: A002
